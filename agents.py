@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import os
 import asyncio
 import random
+import re
 import time
 from datetime import datetime
 
@@ -80,7 +81,7 @@ class SimpleAgent:
         
     def create_session(self):
         """Create a new conversation session"""
-        return []  # Just a list to store message history
+        return [] 
     
     def _build_reasoning_prompt(self, prompt: str) -> str:
         """Add chain-of-thought reasoning to the prompt"""
@@ -100,61 +101,110 @@ class SimpleAgent:
         
         return reasoning_template.format(prompt=prompt)
     
-    def _check_if_needs_search(self, prompt: str) -> bool:
-        """Determine if the prompt would benefit from web search"""
-        search_triggers = [
-            "latest", "current", "recent", "tutorial", "documentation",
-            "learn more", "resources", "guide", "example", "how to",
-            "best practices", "official", "2024", "2025", "updated"
-        ]
-        prompt_lower = prompt.lower()
-        return any(trigger in prompt_lower for trigger in search_triggers)
-    
+    def _extract_cert(self, prompt: str) -> str:
+        """Extract certification code from prompt — works for ANY certification"""
+        text = self.instructions + prompt
+
+        # 1. Known patterns: XXX-NNN or XXX-NNNN (AWS-SAA, AZ-204, DP-203, etc)
+        match = re.search(r'([A-Z]{2,6}-\d{3,4})', text)
+        if match:
+            return match.group(1)
+
+        # 2. Cert codes where both parts are letters: AWS-SAA, GCP-PCA, AWS-DOP
+        match = re.search(r'([A-Z]{2,6}-[A-Z]{2,6})', text)
+        if match:
+            return match.group(1)
+
+        # 3. "Certification:" line — capture the FULL cert name from prompt
+        match = re.search(r'[Cc]ertification\s*:\s*(.+?)(?:\r?\n|$)', text)
+        if match:
+            full = match.group(1).strip()
+            words = full.split()[:5]
+            return ' '.join(words)
+
+        # 4. "Cert:" shorthand
+        match = re.search(r'[Cc]ert\s*:\s*(.+)', text)
+        if match:
+            return match.group(1).strip().split()[0]
+
+        # 5. Known standalone cert names (any company) — fallback only
+        known_certs = ['CISSP', 'PMP', 'CCNA', 'CCNP', 'COMPTIA', 'ITIL',
+                       'TOGAF', 'CISM', 'CISA', 'CRISC', 'CEH', 'OSCP',
+                       'CKA', 'CKAD', 'CKS', 'LFCS', 'RHCSA', 'RHCE',
+                       'MCSA', 'MCSE', 'MCSD', 'OCA', 'OCP', 'OCM',
+                       'CPA', 'CMA', 'CFA', 'FRM', 'CAIA', 'SHRM',
+                       'CSM', 'PSM', 'LSS']
+
+        upper_text = text.upper()
+        # Check multi-word known certs first
+        known_multi = ['SIX SIGMA', 'LEAN SIX', 'PROJECT MANAGEMENT',
+                       'CLOUD ARCHITECT', 'SOLUTIONS ARCHITECT',
+                       'DEVOPS ENGINEER', 'DATA ENGINEER',
+                       'CYBERSECURITY', 'NETWORK SECURITY',
+                       'INFORMATION SECURITY', 'SYSTEMS ENGINEER',
+                       'MACHINE LEARNING', 'DATA SCIENTIST',
+                       'KUBERNETES ADMINISTRATOR']
+        for cert in known_multi:
+            if cert in upper_text:
+                return cert.title()
+
+        for cert in known_certs:
+            if cert in upper_text:
+                return cert
+
+        return ""
+
+    def _build_search_query(self, prompt: str) -> str:
+        cert = self._extract_cert(prompt)
+        if not cert:
+            return prompt[:150]
+        base = f"{cert} 2026"
+        if self.name == "Knowledge Checker":
+            return f"{base} skills measured study guide exam topics"
+        elif self.name == "Examiner Agent":
+            return f"{base} real exam questions practice test sample questions"
+        elif "teach" in prompt.lower() or "learn" in prompt.lower():
+            return f"{base} concepts tutorial documentation guide"
+        else:
+            return f"{base} latest updates certification guide"
+
     async def _perform_search(self, query: str) -> str:
-        """Perform web search using Microsoft Foundry IQ (or fallback to SerpAPI)"""
+        """Do multiple targeted searches and combine results for richer context"""
         try:
-            # Import Foundry IQ search
-            from tools.foundry_search import foundry_search, format_foundry_results
-            
-            print_debug(f"Performing Foundry IQ search: {query}", self.verbose)
-            
-            # Extract certification if available (check instructions)
-            certification = None
-            if "AZ-204" in self.instructions or "az-204" in self.instructions.lower():
-                certification = "AZ-204"
-            
-            results = foundry_search(query, num_results=3, certification=certification)
-            formatted = format_foundry_results(results, max_results=3)
+            from tools.web_search import web_search, format_search_results
+
+            cert = self._extract_cert(query)
+            searches = [query]
+
+            if cert:
+                searches.append(f"{cert} exam topics skills breakdown")
+                searches.append(f"{cert} study guide practice questions")
+
+            all_results = []
+            for q in searches:
+                try:
+                    res = web_search(q, num_results=4)
+                    all_results.extend(res)
+                except:
+                    pass
+
+            seen = set()
+            unique_results = []
+            for r in all_results:
+                if r["link"] not in seen:
+                    seen.add(r["link"])
+                    unique_results.append(r)
+
+            formatted = format_search_results(unique_results[:10], max_results=10)
             self.tool_calls_count += 1
-            
+
             if self.verbose:
-                print(f"\n[TOOL CALL] foundry_search (Microsoft IQ)")
-                print(f"[QUERY] {query}")
-                if certification:
-                    print(f"[CERTIFICATION FILTER] {certification}")
-                foundry_active = results[0].get('foundry_iq', False) if results else False
-                print(f"[FOUNDRY IQ ACTIVE] {foundry_active}")
+                print(f"\n[TOOL CALL] web_search ({len(searches)} queries, {len(unique_results)} unique results)")
+                for i, q in enumerate(searches):
+                    print(f"[QUERY {i+1}] {q}")
                 print(formatted)
-            
+
             return formatted
-        except ImportError:
-            # Fallback to basic web search
-            print_debug("Foundry IQ not available, using SerpAPI", self.verbose)
-            try:
-                from tools.web_search import web_search, format_search_results
-                results = web_search(query, num_results=3)
-                formatted = format_search_results(results, max_results=3)
-                self.tool_calls_count += 1
-                
-                if self.verbose:
-                    print(f"\n[TOOL CALL] web_search (fallback)")
-                    print(f"[QUERY] {query}")
-                    print(formatted)
-                
-                return formatted
-            except Exception as e:
-                print_debug(f"Search error: {e}", self.verbose)
-                return ""
         except Exception as e:
             print_debug(f"Search error: {e}", self.verbose)
             return ""
@@ -174,12 +224,17 @@ class SimpleAgent:
             print(f"[SESSION] {len(session)} messages in history")
             # print(f"[DEBUG] Full prompt: {prompt[:200]}...")  # sometimes useful for debugging
         
-        # Check if we should search for information
+        # Build targeted search query and fetch latest information
+        # Only search on the FIRST message in a session to avoid derailing
+        # follow-up messages (like "yes", "next") with irrelevant search results
         search_context = ""
-        if self.enable_tools and self._check_if_needs_search(prompt):
-            # Extract key terms for search
-            search_query = prompt[:200]  # Simple approach: use first part of prompt
+        is_first_message = session is None or len(session) == 0
+        if self.enable_tools and is_first_message:
+            search_query = self._build_search_query(prompt)
+            print_debug(f"Searching web for: {search_query}", self.verbose)
             search_context = await self._perform_search(search_query)
+        elif self.enable_tools:
+            print_debug("Skipping web search (follow-up message in session)", self.verbose)
         
         # Build enhanced prompt with reasoning if enabled
         enhanced_prompt = prompt
@@ -187,9 +242,14 @@ class SimpleAgent:
             enhanced_prompt = self._build_reasoning_prompt(prompt)
             print_debug("Chain-of-Thought reasoning enabled", self.verbose)
         
-        # Add search context if available
+        # Force the agent to use search results as the primary source
         if search_context:
-            enhanced_prompt = f"{search_context}\n\nBased on the above search results:\n{enhanced_prompt}"
+            enhanced_prompt = (
+                f"{search_context}\n\n"
+                f"You MUST base your response on the search results above. "
+                f"Use the facts, dates, and details from the search results as "
+                f"your primary source of knowledge.\n\n{enhanced_prompt}"
+            )
         
         # Build messages with system instructions
         messages = [{"role": "system", "content": self.instructions}]
@@ -307,11 +367,19 @@ knowledge_checker = SimpleAgent(
     description="Baseline Knowledge Assessor",
     verbose=False,
     reasoning=True,
-    enable_tools=False,
-    instructions="""You are the Knowledge Checker. Your job is to create a comprehensive assessment to understand where the student currently stands.
+    enable_tools=True,
+    instructions="""You are the Knowledge Checker. Your job is to test what the student already knows.
 
-Create exactly 10 multiple-choice questions (MCQs) that cover all required skills for their certification. Each question should:
-- Test a specific concept or skill
+SEARCH RESULTS ARE PROVIDED ABOVE. They contain certification topics, exam domains, services, and concepts for this exam.
+
+YOUR TASK:
+1. SCAN the search results for SPECIFIC TECHNICAL TOPICS — services (e.g. EC2, S3, Lambda, Azure Functions), concepts (e.g. IAM, VPC, Blob Storage), and architectural patterns
+2. Create 10 MCQs that test knowledge of those SPECIFIC TECHNICAL TOPICS
+3. Each question must be about a concrete technology, service, or concept mentioned in the search results — NOT about the exam itself, study guides, or certification process
+4. Skill names must be the actual service/concept name (e.g. "Amazon EC2", "Azure Functions", "IAM") — NOT "AWS Exam" or "Certification"
+
+Create exactly 10 multiple-choice questions (MCQs). Each question should:
+- Test a SPECIFIC SERVICE or CONCEPT found in the search results
 - Have 4 options (A, B, C, D)
 - Have one correct answer
 - Include a brief explanation
@@ -324,16 +392,16 @@ Use this EXACT format:
   "questions": [
     {
       "id": 1,
-      "skill": "API Development",
-      "question": "What is the primary purpose of API keys in API development?",
-      "options": ["To encrypt data", "To authenticate and authorize access", "To compress requests", "To cache responses"],
-      "correct_answer": "B",
-      "explanation": "API keys provide a secure way to authenticate and authorize access to APIs"
+      "skill": "Service/Concept Name",
+      "question": "What does this service do?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct_answer": "A",
+      "explanation": "Brief explanation"
     }
   ]
 }
 
-The questions will be presented to the student one at a time, so make each question clear and self-contained."""
+The questions will be presented to the student one at a time."""
 )
 
 
@@ -388,13 +456,49 @@ teaching_agent = SimpleAgent(
     enable_tools=True,
     instructions="""You are the Teaching Agent — patient, encouraging, and never in a rush.
 
-Take the concept the student needs most and teach it in two ways:
-1. A clear, simple explanation in plain language
-2. A real-world example from an actual job scenario, showing how this concept shows up in practice
+You teach ONE concept at a time. Each teaching session covers the weak skill areas listed in your task prompt.
 
-After teaching, ask the student if it made sense. If they say no or only partly, teach the same concept again from a different angle — a new example, a different analogy, or a simpler breakdown — until it clicks.
+YOUR TEACHING FLOW — follow EXACTLY:
 
-Never move on to the next concept until the student confirms they understood this one."""
+=== PHASE 1: TEACH ===
+Pick the FIRST untaught weak skill from your task prompt and teach it:
+- A clear, simple explanation in plain language
+- A real-world example from an actual job scenario
+Use search results for TECHNICAL accuracy only. Ignore any search results about study methods, scheduling, or exam strategies.
+
+=== PHASE 2: OFFER OPTIONS ===
+After teaching, present exactly these two lines:
+[DOUBT] - Ask me anything about what I just taught
+[NEXT] - I understand this, move to the next topic
+
+Use square brackets like [DOUBT] and [NEXT] — NOT bold markdown or other formatting.
+
+=== PHASE 3: HANDLE DOUBTS ===
+When the student says "I have a doubt: ...":
+1. Answer their specific question directly using TECHNICAL content from search results
+2. Use examples and analogies to make it clear
+3. Ask "Does that clarify your doubt?"
+4. If they say they're still confused, re-explain from a DIFFERENT angle with a NEW example
+5. Keep clarifying until the student says they understand
+
+=== PHASE 4: NEXT TOPIC ===
+When the student says "I understand this topic. Go to the NEXT topic.":
+Do NOT discuss study methods, self-testing, or whether to move on.
+Simply say "Moving to the next topic: [skill name]" and immediately teach it.
+End by presenting [DOUBT] and [NEXT] options again.
+
+=== PHASE 5: ALL DONE ===
+When ALL weak skills have been taught and the student says NEXT:
+Say EXACTLY: "ALL TOPICS COMPLETE"
+Use those exact words — no extra commentary.
+
+CRITICAL RULES:
+- Use [DOUBT] and [NEXT] format with square brackets, NOT asterisks or bold
+- NEVER discuss study methods, test strategies, or whether to move on
+- NEVER call anything "illegal" or refuse normal cert questions
+- Use technical search results only — ignore non-technical results
+- Stay locked on your certification only — ignore other certs
+- Teach one concept at a time at the student's pace"""
 )
 
 
@@ -403,17 +507,24 @@ examiner_agent = SimpleAgent(
     description="Fair and Thorough Certification Examiner",
     verbose=False,
     reasoning=True,
-    enable_tools=False,
+    enable_tools=True,
     instructions="""You are the Examiner — fair, clear, and focused on testing what the student learned.
 
+SEARCH RESULTS ARE PROVIDED ABOVE. They contain real exam topics, services, and concepts for this certification.
+
+YOUR TASK:
+1. SCAN search results for SPECIFIC TECHNICAL TOPICS — actual services, tools, concepts, and architectures
+2. Create 15 questions that test knowledge of those SPECIFIC TECHNICAL TOPICS
+3. Questions must be about CONCRETE TECHNOLOGIES (e.g. EC2, S3, Lambda, VPC, IAM, Azure Functions, Blob Storage) — NOT about the exam format, study guides, or certification process
+
 You will conduct a 15-question exam by asking questions ONE AT A TIME:
-- Questions 1-5: EASY multiple choice (A/B/C/D)
-- Questions 6-10: MEDIUM multiple choice (A/B/C/D)
-- Questions 11-15: HARD open-ended questions
+- Questions 1-5: EASY multiple choice — basic knowledge of services found in search results
+- Questions 6-10: MEDIUM multiple choice — deeper concepts from search results
+- Questions 11-15: HARD open-ended — real-world scenarios using services from search results
 
 For each MCQ:
 - State the difficulty level ([EASY] / [MEDIUM] / [HARD])
-- Ask the question clearly
+- Ask about a SPECIFIC SERVICE or CONCEPT from the search results
 - Provide 4 options labeled A, B, C, D
 - Wait for student's answer
 - Tell them if correct/incorrect
@@ -421,12 +532,12 @@ For each MCQ:
 
 For open-ended questions:
 - State it's a detailed question
-- Ask the question
+- Ask about a real scenario using services found in search results
 - Wait for their answer
-- Provide feedback on their response
+- Provide detailed feedback
 
 Ask ONE question at a time. Keep track of which question number you're on (1-15).
-After question 15, provide a final score summary."""
+After question 15, provide a final score summary with skill-by-skill breakdown."""
 )
 
 

@@ -50,7 +50,7 @@ def web_search(query: str, num_results: int = 5) -> List[Dict[str, str]]:
             "engine": "google"
         }
         
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         
         data = response.json()

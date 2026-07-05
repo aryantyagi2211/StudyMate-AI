@@ -5,6 +5,154 @@ LEARNER = None  # Will be set by main.py
 CERT = None     # Will be set after learner chooses certification
 
 
+def _generate_skills_for_cert(certification):
+    """Generate meaningful default skills for ANY certification by analyzing its name"""
+    cert_upper = certification.upper()
+
+    # -------------------- Cloud Providers --------------------
+    if cert_upper.startswith("AWS"):
+        return ["Compute Services", "Storage & Databases", "Networking & CDN",
+                "Security & Identity", "Monitoring & Analytics", "Deployment & Automation"]
+    if cert_upper.startswith("GCP") or "GOOGLE" in cert_upper:
+        return ["Compute Engine", "Storage & Databases", "Networking",
+                "Security & IAM", "Data & Analytics", "DevOps & Deployment"]
+    if cert_upper.startswith("AZ") or "AZURE" in cert_upper:
+        return ["Compute", "Storage", "Networking", "Security", "Monitoring", "Development"]
+    if cert_upper.startswith("DP"):
+        return ["Data Storage", "Data Processing", "Data Security", "Data Pipelines", "Data Monitoring"]
+    if cert_upper.startswith("SC"):
+        return ["Identity & Access", "Security Operations", "Data Protection",
+                "Threat Protection", "Compliance"]
+
+    # -------------------- DevOps / Containers / K8s --------------------
+    if any(kw in cert_upper for kw in ["CKA", "CKAD", "CKS", "KUBERNETES"]):
+        return ["Cluster Architecture", "Workloads & Scheduling", "Services & Networking",
+                "Storage", "Security", "Troubleshooting"]
+    if "DOCKER" in cert_upper:
+        return ["Container Management", "Image Management", "Networking", "Security", "Orchestration"]
+    if "TERRAFORM" in cert_upper:
+        return ["Infrastructure as Code", "State Management", "Modules", "Provisioning", "Security"]
+    if "ANSIBLE" in cert_upper:
+        return ["Inventory Management", "Playbooks", "Roles", "Variables", "Automation"]
+    if "DEVOPS" in cert_upper:
+        return ["CI/CD", "Infrastructure as Code", "Monitoring", "Security", "Collaboration"]
+
+    # -------------------- Linux / SysAdmin --------------------
+    if any(kw in cert_upper for kw in ["RHCSA", "RHCE", "LFCS", "LINUX"]):
+        return ["System Administration", "File Systems", "Networking", "Security",
+                "Service Management", "Shell Scripting"]
+
+    # -------------------- Database --------------------
+    if "DATABASE" in cert_upper or "DBA" in cert_upper:
+        return ["Database Design", "Query Optimization", "Backup & Recovery",
+                "Security", "Performance Tuning"]
+    if "ORACLE" in cert_upper or cert_upper.startswith("OC") or cert_upper.startswith("OCM"):
+        return ["SQL", "Database Admin", "Backup & Recovery", "Performance Tuning", "Security"]
+
+    # -------------------- Microsoft Legacy --------------------
+    if any(kw in cert_upper for kw in ["MCSA", "MCSE", "MCSD", "MS-"]):
+        return ["Server Administration", "Networking", "Security", "Active Directory", "Deployment"]
+
+    # -------------------- Networking --------------------
+    if any(kw in cert_upper for kw in ["CISCO", "CCNP", "CCIE", "NETWORK", "JNCIA", "JNCIP"]):
+        return ["Network Fundamentals", "Routing & Switching", "Security",
+                "Automation", "Network Access", "Troubleshooting"]
+    if "CCNA" in cert_upper:
+        return ["Network Fundamentals", "Routing & Switching", "Security Fundamentals",
+                "Automation", "Network Access", "IP Connectivity"]
+
+    # -------------------- Security --------------------
+    if "CISSP" in cert_upper:
+        return ["Security Management", "Asset Security", "Security Architecture",
+                "Communication Security", "Identity Management", "Security Assessment"]
+    if "CISM" in cert_upper:
+        return ["Information Security Governance", "Risk Management", "Program Development",
+                "Incident Management"]
+    if "CISA" in cert_upper:
+        return ["IS Auditing", "Governance & Management", "Acquisition & Implementation",
+                "Operations & Maintenance", "Protection"]
+    if any(kw in cert_upper for kw in ["CEH", "OSCP", "PENTEST", "ETHICAL"]):
+        return ["Reconnaissance", "Enumeration", "Exploitation", "Post-Exploitation", "Reporting"]
+    if "SECURITY" in cert_upper or "CYBER" in cert_upper:
+        return ["Risk Management", "Network Security", "Identity & Access",
+                "Incident Response", "Compliance"]
+
+    # -------------------- Project Management --------------------
+    if "PMP" in cert_upper or "PROJECT" in cert_upper:
+        return ["Project Integration", "Scope Management", "Schedule Management",
+                "Cost Management", "Risk Management", "Stakeholder Management"]
+    if any(kw in cert_upper for kw in ["AGILE", "SCRUM", "CSM", "PSM", "SAFE"]):
+        return ["Agile Principles", "Scrum Framework", "Sprint Planning",
+                "Team Facilitation", "Continuous Improvement"]
+
+    # -------------------- ITSM / ITIL --------------------
+    if "ITIL" in cert_upper:
+        return ["Service Strategy", "Service Design", "Service Transition",
+                "Service Operation", "Continual Improvement"]
+
+    # -------------------- Six Sigma / Lean --------------------
+    if "SIX SIGMA" in cert_upper or "LEAN" in cert_upper:
+        return ["DMAIC", "Process Mapping", "Statistical Analysis",
+                "Lean Principles", "Control Plans", "Project Charter"]
+
+    # -------------------- Enterprise Architecture --------------------
+    if "TOGAF" in cert_upper:
+        return ["Architecture Development", "ADM Cycle", "Enterprise Continuum",
+                "Architecture Framework", "Governance"]
+
+    # -------------------- Finance / Accounting --------------------
+    if any(kw in cert_upper for kw in ["CFA", "CPA", "CMA", "FRM", "ACCA", "CIMA"]):
+        return ["Financial Reporting", "Audit & Assurance", "Taxation",
+                "Risk Management", "Ethics & Governance"]
+
+    # -------------------- HR / SHRM --------------------
+    if any(kw in cert_upper for kw in ["SHRM", "PHR", "SPHR", "HRCI"]):
+        return ["Workforce Planning", "Talent Acquisition", "Compensation",
+                "Employee Relations", "Compliance"]
+
+    # -------------------- Data / ML / AI --------------------
+    if any(kw in cert_upper for kw in ["MACHINE LEARNING", "ML ", " DATA ", "AI ",
+                                       "DATA ENGINEER", "DATA SCIENTIST",
+                                       "DATA ANALYTICS"]):
+        return ["Data Modeling", "Data Processing", "Analytics", "ML Techniques",
+                "Visualization", "Deployment"]
+
+    # -------------------- General IT / Entry Level --------------------
+    if "COMPTIA" in cert_upper:
+        return ["Hardware", "Networking", "Security", "Troubleshooting", "Operational Procedures"]
+    if "ITF" in cert_upper:
+        return ["IT Concepts", "Infrastructure", "Applications", "Software Development", "Database"]
+
+    # -------------------- Salesforce --------------------
+    if "SALESFORCE" in cert_upper:
+        return ["Salesforce Administration", "Security & Access", "Object Management",
+                "Automation", "Reports & Dashboards"]
+
+    # -------------------- Final fallback: analyze keywords --------------------
+    kw_to_skills = {
+        "SECURITY": ["Access Control", "Network Security", "Risk Assessment",
+                     "Incident Response", "Compliance"],
+        "NETWORK": ["Protocols", "Routing", "Switching", "Security", "Troubleshooting"],
+        "CLOUD": ["Compute", "Storage", "Networking", "Security", "Deployment"],
+        "DEVELOPER": ["Code Design", "Debugging", "Testing", "Version Control", "APIs"],
+        "ADMIN": ["User Management", "Configuration", "Maintenance", "Monitoring", "Backup"],
+        "ARCHITECT": ["Solution Design", "Integration", "Performance", "Security", "Cost Optimization"],
+        "MANAGEMENT": ["Planning", "Execution", "Monitoring", "Risk", "Stakeholder"],
+        "FOUNDATION": ["Core Concepts", "Best Practices", "Terminology", "Lifecycle", "Principles"],
+        "ASSOCIATE": ["Core Concepts", "Implementation", "Troubleshooting", "Security", "Optimization"],
+        "PROFESSIONAL": ["Advanced Design", "Integration", "Migration", "Security", "Optimization"],
+        "EXPERT": ["Advanced Architecture", "Strategy", "Innovation", "Governance", "Leadership"],
+        "MASTER": ["Enterprise Design", "Strategy", "Innovation", "Leadership", "Governance"],
+        "PRACTITIONER": ["Core Practices", "Implementation", "Measurement", "Improvement", "Culture"],
+    }
+    for kw, skills in kw_to_skills.items():
+        if kw in cert_upper:
+            return skills
+
+    return ["Core Concepts", "Architecture & Design", "Implementation",
+            "Security & Compliance", "Troubleshooting", "Best Practices"]
+
+
 def set_learner_data(name, role, certification):
     """Set the current learner data for this session"""
     global LEARNER, CERT
@@ -13,15 +161,17 @@ def set_learner_data(name, role, certification):
         "role": role,
         "certification": certification
     }
-    # Get cert data from guide or create basic one
-    CERT = CERT_GUIDE.get(certification, {
-        "full_name": f"{certification} Certification",
-        "skills": ["Core Skills", "Advanced Topics", "Best Practices"],
-        "recommended_hours": 20,
-        "passing_score": 700,
-        "exam_format": "Multiple choice questions",
-        "difficulty": "Intermediate"
-    })
+    if certification in CERT_GUIDE:
+        CERT = CERT_GUIDE[certification]
+    else:
+        CERT = {
+            "full_name": f"{certification} Certification",
+            "skills": _generate_skills_for_cert(certification),
+            "recommended_hours": 20,
+            "passing_score": 700,
+            "exam_format": "Multiple choice questions",
+            "difficulty": "Intermediate"
+        }
 
 
 def use_demo_data():
@@ -65,16 +215,18 @@ Based on their role, make a warm guess about motivation and set the tone. Keep u
 
 task_knowledge_checker = {
     "description": lambda: f"""
-    Create a comprehensive knowledge assessment for {LEARNER['name']} to understand their current skill level.
+    You have search results above for {LEARNER['certification']}. Use them as your ONLY source.
 
     Certification: {LEARNER['certification']}
-    Skills required: {CERT['skills']}
+    Skills to consider: {CERT['skills']}
 
-    Create 10 multiple-choice questions (MCQs) covering all required skills:
-    - 3-4 questions per major skill area
+    Look at the search results and IDENTIFY the actual topics, services, and concepts mentioned there.
+    Create 10 multiple-choice questions (MCQs) about those specific topics:
+    - 3-4 questions per major topic area found in the search results
     - Each question should have 4 options (A, B, C, D)
     - One correct answer per question
-    - Questions should range from basic to intermediate difficulty
+    - Use the skill/topic names as they appear in the search results
+    - Questions must be based ONLY on the search results provided
 
     CRITICAL: Return ONLY valid JSON in this EXACT format (no markdown, no code fences, no extra text):
 
@@ -82,18 +234,18 @@ task_knowledge_checker = {
       "questions": [
         {{
           "id": 1,
-          "skill": "API Development",
-          "question": "What is the primary purpose of API keys?",
-          "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+          "skill": "Topic Name from Search Results",
+          "question": "Question about that specific topic?",
+          "options": ["Option A", "Option B", "Option C", "Option D"],
           "correct_answer": "A",
-          "explanation": "Brief explanation of why this is correct"
+          "explanation": "Brief explanation based on search results"
         }}
       ]
     }}
 
     The system will present these questions one by one to the student.
     """,
-    "expected_output": "JSON object with 10 MCQ questions, each with id, skill, question text, 4 options, correct answer (A/B/C/D), and explanation."
+    "expected_output": "JSON object with 10 MCQ questions based on search results, each with id, skill, question text, 4 options, correct answer (A/B/C/D), and explanation."
 }
 
 task_learning_path = {
@@ -105,8 +257,8 @@ task_learning_path = {
     Recommended study hours: {CERT['recommended_hours']}
 
     For each skill that still needs work, point them to:
-    - The most relevant official Microsoft Learn module
-    - One great video or channel
+    - The most relevant official documentation or learning module
+    - One great video or course
     - One well-written article or blog post
     - A hands-on exercise, sandbox, or repo to practice with
     - A community (subreddit, Discord, forum) where people discuss this topic
@@ -145,39 +297,46 @@ task_adaptive_plan = {
 
 task_teaching = {
     "description": lambda: f"""
-    Teach {LEARNER['name']} the concept they need most right now.
+    You are teaching {LEARNER['name']} one concept at a time for {LEARNER['certification']}.
 
     Certification: {LEARNER['certification']}
-    Skills in scope: {CERT['skills']}
+    All skills: {CERT['skills']}
 
-    Look at the skill ranking from the Knowledge Checker and start with
-    whichever skill came out weakest. Teach it in two ways — a simple, clear
-    explanation, and a real-world example from an actual job scenario.
+    The weak skills that need teaching are listed in the context above.
+    Teach them ONE BY ONE in the order they appear.
 
-    Then ask if it made sense. If the answer is no or "somewhat," teach it
-    again from a different angle. Only move on to the next concept once it's
-    clear this one has landed.
+    TEACHING FLOW (repeat for each weak skill):
+    1. TEACH: clear explanation + real-world example
+    2. ASK: offer [DOUBT] and [NEXT] options
+    3. If DOUBT: clarify, repeat until satisfied, then offer options again
+    4. If NEXT: say "Moving to the next topic: [skill name]", teach it
+    5. When ALL weak skills done: say "ALL TOPICS COMPLETE"
+
+    CRITICAL: Do NOT discuss study methods, test strategies, or whether to move on.
+    When student says NEXT, just move to the next skill immediately.
     """,
-    "expected_output": "A two-way teaching of the weakest concept, with a comprehension check before moving on."
+    "expected_output": "One skill taught at a time with real-world examples, doubt handling, and next-topic progression."
 }
 
 
 task_examiner = {
     "description": lambda: f"""
-    Create a comprehensive exam for {LEARNER['name']} based on what the Teaching Agent just covered.
+    You have search results above with real {LEARNER['certification']} exam content. Use them as your ONLY source.
 
     Certification: {LEARNER['certification']}
     Skills in scope: {CERT['skills']}
 
-    Create exactly 15 questions with varying difficulty levels:
-    - 5 EASY questions (multiple choice)
-    - 5 MEDIUM questions (multiple choice)
-    - 5 HARD questions (open-ended Q&A style)
+    Look at the search results and IDENTIFY the specific topics, services, and concepts mentioned.
+    Create exactly 15 questions based STRICTLY on those topics:
+    - 5 EASY questions (multiple choice) — about basic concepts from search results
+    - 5 MEDIUM questions (multiple choice) — about deeper topics from search results
+    - 5 HARD questions (open-ended Q&A style) — about complex scenarios from search results
 
     For MCQ questions:
     - Each has 4 options (A, B, C, D)
     - One correct answer
     - Brief explanation
+    - Skill name should match what appears in search results
 
     For Q&A questions:
     - Open-ended question requiring detailed answer
@@ -192,8 +351,8 @@ task_examiner = {
           "id": 1,
           "type": "mcq",
           "difficulty": "easy",
-          "skill": "API Development",
-          "question": "Question text here?",
+          "skill": "Topic from search results",
+          "question": "Question about that topic?",
           "options": ["Option A", "Option B", "Option C", "Option D"],
           "correct_answer": "B",
           "explanation": "Brief explanation"
@@ -202,17 +361,17 @@ task_examiner = {
           "id": 11,
           "type": "qa",
           "difficulty": "hard",
-          "skill": "Azure Functions",
-          "question": "Explain question text here?",
+          "skill": "Topic from search results",
+          "question": "Explain a concept from the search results?",
           "model_answer": "Detailed model answer",
           "key_points": ["Point 1", "Point 2", "Point 3"]
         }}
       ]
     }}
 
-    Label each question with the skill it tests. After scoring, flag any skill where the student scored below 60% for more teaching.
+    Label each question with the skill/topic name as it appears in search results. After scoring, flag any skill where the student scored below 60% for more teaching.
     """,
-    "expected_output": "JSON with 15 questions (10 MCQ: 5 easy + 5 medium, 5 Q&A: hard), each labeled with difficulty and skill, with answers and explanations."
+    "expected_output": "JSON with 15 questions based on search results (10 MCQ: 5 easy + 5 medium, 5 Q&A: hard), each labeled with difficulty and skill, with answers and explanations."
 }
 
 

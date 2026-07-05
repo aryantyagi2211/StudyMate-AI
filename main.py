@@ -1,8 +1,6 @@
 """
-main.py — StudyMate AI session runner
-
-This version talks to the student through an interactive flow.
-Profiler → Knowledge Checker → Learning Path → Teaching → Exam loop
+main.py — StudyMate AI session runner with pixel-style UI
+Profiler -> Knowledge Checker -> Learning Path -> Teaching -> Exam loop
 """
 
 import asyncio
@@ -10,92 +8,68 @@ import json
 import re
 
 from agents import (
-    ceo_agent,
-    profiler_agent,
-    knowledge_checker,
-    learning_path_agent,
-    adaptive_planner,
-    teaching_agent,
-    examiner_agent,
-    manager_insights_agent,
+    ceo_agent, profiler_agent, knowledge_checker,
+    learning_path_agent, adaptive_planner, teaching_agent,
+    examiner_agent, manager_insights_agent,
 )
-
 from tasks import (
-    task_ceo,
-    task_profiler,
-    task_knowledge_checker,
-    task_learning_path,
-    task_adaptive_plan,
-    task_teaching,
-    task_examiner,
-    task_manager_insights,
-    set_learner_data,
-    use_demo_data,
+    task_ceo, task_profiler, task_knowledge_checker,
+    task_learning_path, task_adaptive_plan, task_teaching,
+    task_examiner, task_manager_insights,
+    set_learner_data, use_demo_data,
 )
-import tasks  # Import module to access LEARNER and CERT dynamically
+import tasks
+import ui
 
 
 def get_custom_data():
     """Ask user for their custom data one by one"""
-    print("\n" + "="*60)
-    print("Let's set up your profile!")
-    print("="*60 + "\n")
-    
-    name = input("What's your name? ").strip()
+    ui.header("PROFILE SETUP")
+    name = ui.input_prompt("What's your name?").strip()
     while not name:
-        print("[!] Name cannot be empty.")
-        name = input("What's your name? ").strip()
-    
-    role = input("\nWhat's your role? (e.g., Cloud Engineer, Developer): ").strip()
+        ui.warn("Name cannot be empty.")
+        name = ui.input_prompt("What's your name?").strip()
+
+    role = ui.input_prompt("What's your role? (e.g., Cloud Engineer, Developer)").strip()
     while not role:
-        print("[!] Role cannot be empty.")
-        role = input("What's your role? ").strip()
-    
-    certification = input("\nWhich certification? (e.g., AZ-204, AZ-400, DP-203): ").strip().upper()
-    while not certification:
-        print("[!] Certification cannot be empty.")
-        certification = input("Which certification? ").strip().upper()
-    
-    print(f"\nGreat! Setting up your journey for {certification}...")
-    
-    # TODO: search for cert details using Foundry IQ or web search
-    # For now, use fallback data from CERT_GUIDE
-    
-    return name, role, certification
+        ui.warn("Role cannot be empty.")
+        role = ui.input_prompt("What's your role?").strip()
+
+    cert = ui.input_prompt("Which certification? (e.g., AWS-SAA, CCNA, CISSP)").strip().upper()
+    while not cert:
+        ui.warn("Certification cannot be empty.")
+        cert = ui.input_prompt("Which certification?").strip().upper()
+
+    ui.ok(f"Setting up your journey for {cert}...")
+    return name, role, cert
 
 
 def choose_mode():
     """Let user choose between custom data or demo mode"""
-    print("\n" + "="*60)
-    print("Welcome to StudyMate AI!")
-    print("="*60)
-    print("\nChoose mode:")
-    print("1. Custom Data (enter your own info)")
-    print("2. Demo Mode (use sample student)")
+    ui.header("STUDYMATE AI")
+    ui.option_list([
+        ("1", "Custom Data (enter your own info)"),
+        ("2", "Demo Mode (use sample student)"),
+    ])
     print()
-    
     while True:
-        choice = input("Your choice (1 or 2): ").strip()
+        choice = ui.input_prompt("Your choice (1 or 2)").strip()
         if choice == "1":
             name, role, cert = get_custom_data()
             set_learner_data(name, role, cert)
-            print(f"\n[✓] Profile created for {name}!")
+            ui.ok(f"Profile created for {name}!")
             return "custom"
         elif choice == "2":
             use_demo_data()
-            # Note: LEARNER is updated globally in tasks.py
             import tasks
-            print(f"\n[✓] Loading demo: {tasks.LEARNER['name']} ({tasks.LEARNER['role']}, {tasks.LEARNER['certification']})")
+            ui.ok(f"Loading demo: {tasks.LEARNER['name']} ({tasks.LEARNER['role']}, {tasks.LEARNER['certification']})")
             return "demo"
-        else:
-            print("[!] Please enter 1 or 2")
+        ui.warn("Please enter 1 or 2")
 
 
 def build_prompt(task, context=""):
     """Turn a task dict into the message we send to an agent"""
-    # Call lambda if description is a function
     description = task["description"]() if callable(task["description"]) else task["description"]
-    
     prompt = description
     if context:
         prompt = (
@@ -106,88 +80,41 @@ def build_prompt(task, context=""):
     return prompt
 
 
-async def run_step(agent, prompt, session=None):
-    """Send one message to an agent and return its reply as plain text."""
-    response = await agent.run(prompt, session=session)
-    # Get the text content from the response
-    if hasattr(response, 'text'):
-        return response.text
-    elif hasattr(response, 'content'):
-        return str(response.content)
-    else:
+async def run_step(agent, prompt, session=None, agent_name="Agent"):
+    """Send one message to an agent and return its reply as plain text.
+    Shows a pixel loader while agent is generating."""
+    task, stop = await ui.start_loader(f"{agent_name} is generating...")
+    try:
+        response = await agent.run(prompt, session=session)
+        if hasattr(response, 'text'):
+            return response.text
+        elif hasattr(response, 'content'):
+            return str(response.content)
         return str(response)
+    finally:
+        stop.set()
+        await task
 
 
-def print_header(title):
-    print("\n" + "-" * 50)
-    print(title)
-    print("-" * 50)
-
-
-# ---------------------------------------------------------------------------
-# Exam flow — the Examiner Agent returns the exam as JSON, so we can walk the
-# student through it one question at a time and grade real answers.
-# ---------------------------------------------------------------------------
-
-EXAM_FORMAT_INSTRUCTIONS = """
-For this exam, ignore the "Expected output" format described above. Instead,
-return ONLY valid JSON, with no markdown formatting, no code fences, and no
-extra commentary. Use exactly this structure:
-
-{
-  "questions": [
-    {
-      "type": "mcq",
-      "skill": "<skill this question tests>",
-      "question": "<question text>",
-      "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
-      "correct_answer": "<exact text of the correct option>",
-      "explanation": "<one line explanation>"
-    },
-    {
-      "type": "mcq",
-      "skill": "<skill this question tests>",
-      "question": "<question text>",
-      "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
-      "correct_answer": "<exact text of the correct option>",
-      "explanation": "<one line explanation>"
-    },
-    {
-      "type": "open",
-      "skill": "<skill this question tests>",
-      "question": "<question text>",
-      "model_answer": "<model answer>"
-    }
-  ]
-}
-"""
-
+# ── JSON parsing helpers ──────────────────────────────────────────────────
 
 def parse_mcq_json(raw_text):
     """Try to extract MCQ questions from the agent's reply."""
     cleaned = raw_text.strip()
-    
-    # Remove markdown code fences
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
         if cleaned.lower().startswith("json"):
             cleaned = cleaned[4:]
         cleaned = cleaned.strip()
-    
-    # Try to extract JSON from text that might have reasoning before it
-    # Look for the first '{' and last '}'
     start_idx = cleaned.find('{')
     end_idx = cleaned.rfind('}')
-    
     if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
         cleaned = cleaned[start_idx:end_idx + 1]
-    
     try:
         data = json.loads(cleaned)
         return data.get("questions", [])
     except (json.JSONDecodeError, AttributeError) as e:
-        print(f"Warning: Could not parse JSON: {e}")
-        # Try one more time - look for JSON after any text
+        ui.warn(f"Could not parse JSON: {e}")
         json_pattern = r'\{[\s\S]*"questions"[\s\S]*\}'
         match = re.search(json_pattern, raw_text)
         if match:
@@ -199,70 +126,89 @@ def parse_mcq_json(raw_text):
         return []
 
 
+def parse_exam_json(raw_text):
+    """Try to pull a list of questions out of the agent's reply."""
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    json_matches = re.findall(r'\{[\s\S]*?"questions"[\s\S]*?\}', cleaned)
+    if json_matches:
+        cleaned = json_matches[0]
+    try:
+        data = json.loads(cleaned)
+        questions = data.get("questions", [])
+        valid = [q for q in questions if "question" in q and ("options" in q or "type" in q)]
+        return valid
+    except (json.JSONDecodeError, AttributeError) as e:
+        ui.warn(f"JSON Parse Error: {e}")
+        return []
+
+
+def to_option_text(value, options):
+    letters = {chr(65 + i): option for i, option in enumerate(options)}
+    return letters.get(value.strip().upper(), value)
+
+
+# ── Knowledge Assessment ──────────────────────────────────────────────────
+
 async def run_knowledge_assessment():
     """Run the interactive knowledge checker with 10 MCQs presented one by one."""
-    
-    print_header("[Knowledge Checker] Quick diagnostic")
-    
-    # Get 10 MCQs from Knowledge Checker
+    ui.header("KNOWLEDGE CHECKER")
+
     assessment_prompt = build_prompt(task_knowledge_checker)
-    raw = await run_step(knowledge_checker, assessment_prompt)
-    
+    raw = await run_step(knowledge_checker, assessment_prompt, agent_name="Knowledge Checker")
     questions = parse_mcq_json(raw)
-    
+
     if not questions or len(questions) < 5:
-        print("[WARNING] Couldn't generate proper assessment questions. Here's the raw response:\n")
+        ui.warn("Couldn't generate proper assessment. Raw response:")
         print(raw)
         return {"total": 0, "correct": 0, "percentage": 0, "skill_scores": {}}
-    
-    print(f"📋 Assessment ready! {len(questions)} questions to test your knowledge.\n")
-    print("Instructions: Answer each question by typing A, B, C, or D\n")
-    
+
+    ui.ok(f"Assessment ready! {len(questions)} questions to test your knowledge.")
+    ui.info("Answer each question by typing A, B, C, or D\n")
+
     results = []
     correct_count = 0
-    
+
     for q in questions:
-        print("-" * 60)
-        print(f"\n[Q{q.get('id', '?')}] {q.get('skill', 'General')}\n")
-        print(q.get('question', ''))
-        print()
-        
-        options = q.get('options', [])
-        for idx, option in enumerate(options):
-            print(f"  {chr(65 + idx)}. {option}")
-        
-        # Get user answer
+        ui.display_question(
+            q.get('id', '?'),
+            q.get('skill', 'General'),
+            q.get('question', ''),
+            q.get('options', [])
+        )
+
         while True:
-            answer = input("\n👉 Your answer (A/B/C/D): ").strip().upper()
+            answer = ui.input_prompt("Your answer (A/B/C/D)").strip().upper()
             if answer in ['A', 'B', 'C', 'D']:
                 break
-            print("[ERROR] Please enter A, B, C, or D")
-        
+            ui.warn("Please enter A, B, C, or D")
+
         correct_answer = q.get('correct_answer', '').strip().upper()
         is_correct = (answer == correct_answer)
-        
-        # TODO: maybe add explanation before showing if they're right/wrong?
+
         if is_correct:
             correct_count += 1
-            print("[✓] Correct!")
+            ui.ok("Correct!")
         else:
-            print(f"[✗] Incorrect. The correct answer is: {correct_answer}")
-        
-        print(f"[INFO] {q.get('explanation', '')}")
-        
+            ui.fail(f"Incorrect. The correct answer is: {correct_answer}")
+
+        if q.get('explanation'):
+            ui.info(q['explanation'])
+
         results.append({
             "id": q.get('id'),
             "skill": q.get('skill', 'General'),
             "correct": is_correct
         })
-        
-        print()
-    
+
     # Calculate scores
     total = len(results)
     percentage = int((correct_count / total) * 100) if total > 0 else 0
-    
-    # Calculate skill-wise scores
+
     skill_scores = {}
     for r in results:
         skill = r['skill']
@@ -271,527 +217,254 @@ async def run_knowledge_assessment():
         skill_scores[skill]['total'] += 1
         if r['correct']:
             skill_scores[skill]['correct'] += 1
-    
-    # Generate summary
-    print("\n" + "=" * 60)
-    print("[ASSESSMENT RESULTS]")
-    print("=" * 60)
-    print(f"\n[SCORE] Overall: {correct_count}/{total} ({percentage}%)\n")
-    
-    print("[ANALYSIS] Skill Breakdown:")
+
+    # Results display
+    ui.header("ASSESSMENT RESULTS")
+    ui.score_display(correct_count, total, "Overall")
+    print()
+    ui.section("Skill Breakdown")
     assessment_summary = []
     for skill, scores in skill_scores.items():
         skill_pct = int((scores['correct'] / scores['total']) * 100)
-        
         if skill_pct >= 80:
-            level = "STRONG [✓]"
-            recommendation = "You're doing great! Just a quick refresher needed."
+            level = "STRONG"
+            rec = "Just a quick refresher needed."
         elif skill_pct >= 60:
-            level = "MEDIUM [!]"
-            recommendation = "You understand the basics but need more practice."
+            level = "MEDIUM"
+            rec = "Understands basics but needs more practice."
         else:
-            level = "WEAK [✗]"
-            recommendation = "This needs focused teaching from the ground up."
-        
-        print(f"\n  • {skill}: {scores['correct']}/{scores['total']} ({skill_pct}%) — {level}")
-        print(f"    {recommendation}")
-        
+            level = "WEAK"
+            rec = "Needs focused teaching from the ground up."
+        bar = ui.progress_bar(scores['correct'], scores['total'], 12,
+                              ui.C.GRN if skill_pct >= 80 else ui.C.YLW if skill_pct >= 60 else ui.C.RED)
+        print(f'    {ui.c(skill, ui.C.WHT):30s} {bar}  {ui.c(level, ui.C.BLD)}')
         assessment_summary.append(f"{skill}: {skill_pct}% ({level})")
-    
-    print("\n" + "=" * 60)
-    
+
     return {
-        "total": total,
-        "correct": correct_count,
-        "percentage": percentage,
-        "skill_scores": skill_scores,
+        "total": total, "correct": correct_count,
+        "percentage": percentage, "skill_scores": skill_scores,
         "summary": "\n".join(assessment_summary)
     }
 
 
-def parse_exam_json(raw_text):
-    """Try to pull a list of questions out of the agent's reply."""
-    cleaned = raw_text.strip()
-    
-    # Remove markdown code fences
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`")
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:]
-        cleaned = cleaned.strip()
-    
-    # Find the first valid JSON object
-    import re
-    json_matches = re.findall(r'\{[\s\S]*?"questions"[\s\S]*?\}', cleaned)
-    
-    if json_matches:
-        # Use the first match only
-        cleaned = json_matches[0]
-    
-    try:
-        data = json.loads(cleaned)
-        questions = data.get("questions", [])
-        
-        # Ensure we have valid questions with required fields
-        valid_questions = []
-        for q in questions:
-            if "question" in q and ("options" in q or "type" in q):
-                valid_questions.append(q)
-        
-        return valid_questions
-    except (json.JSONDecodeError, AttributeError) as e:
-        print(f"[WARNING] JSON Parse Error: {e}")
-        return []
-
-
-def to_option_text(value, options):
-    """Let the student answer with A/B/C/D, and let correct_answer be either
-    a letter or the option text — normalize both to the option text."""
-    letters = {chr(65 + i): option for i, option in enumerate(options)}
-    key = value.strip().upper()
-    return letters.get(key, value)
-
+# ── Interactive Exam ──────────────────────────────────────────────────────
 
 async def run_exam_interactive():
-    """Run interactive exam with 15 questions asked one by one (like knowledge checker)."""
-    
-    print_header("[Examiner Agent] Final Exam - 15 Questions")
-    print("[INFO] Mix of multiple-choice and open-ended questions.")
-    print("Difficulty levels: [EASY] (1-5), [MEDIUM] (6-10), [HARD] (11-15)\n")
-    
+    """Run interactive exam with 10 MCQ questions, one by one."""
+    ui.header("FINAL EXAM - 10 QUESTIONS")
+    ui.info("All multiple-choice questions with 4 options (A/B/C/D).")
+    ui.info("Difficulty: [EASY] (1-3), [MEDIUM] (4-7), [HARD] (8-10)\n")
+
     examiner_session = examiner_agent.create_session()
-    
-    # Initial prompt to start the exam
+
+    EXAM_Q_COUNT = 10
+
     start_prompt = f"""Start the certification exam for {tasks.LEARNER['name']}.
-    
+
 Skills to test: {', '.join(tasks.CERT['skills'])}
 
-Begin by asking Question 1 (EASY MCQ). Remember to:
+You will ask exactly {EXAM_Q_COUNT} MCQ questions. Begin by asking Question 1.
+Remember to:
 - Show difficulty level
-- Provide 4 options (A/B/C/D)
-- Ask ONE question at a time"""
-    
-    reply = await run_step(examiner_agent, start_prompt, session=examiner_session)
-    print(reply)
-    
-    # Track results
-    results = {
-        'total': 15,
-        'correct': 0,
-        'mcq_correct': 0,
-        'mcq_total': 10,
-        'answers': []
-    }
-    
-    # Interactive Q&A for 15 questions
-    for question_num in range(1, 16):
-        # Get student answer
-        if question_num <= 10:
-            # MCQ questions
-            while True:
-                answer = input("\n👉 Your answer (A/B/C/D): ").strip().upper()
-                if answer in ['A', 'B', 'C', 'D']:
-                    break
-                print("[ERROR] Please enter A, B, C, or D")
-        else:
-            # Open-ended questions
-            answer = input("\n[ANSWER] Your detailed answer:\n> ").strip()
-        
-        # Send answer to examiner
-        reply = await run_step(examiner_agent, answer, session=examiner_session)
-        print("\n" + reply)
-        
-        # Track if correct (look for [✓] or "correct" in response)
-        if question_num <= 10 and ("[✓]" in reply or "correct" in reply.lower()):
-            results['mcq_correct'] += 1
+- Provide 4 options (A/B/C/D) with correct_answer
+- Ask ONE question at a time
+- Use JSON format for easy parsing:
+  {{"question": "...", "options": ["...", "..."], "correct_answer": "A", "skill": "...", "difficulty": "EASY"}}"""
+
+    reply = await run_step(examiner_agent, start_prompt, session=examiner_session, agent_name="Examiner")
+    ui.agent_output("Examiner", reply)
+
+    results = {'total': EXAM_Q_COUNT, 'correct': 0, 'answers': []}
+
+    for question_num in range(1, EXAM_Q_COUNT + 1):
+        while True:
+            answer = ui.input_prompt("Your answer (A/B/C/D)").strip().upper()
+            if answer in ['A', 'B', 'C', 'D']:
+                break
+            ui.warn("Please enter A, B, C, or D")
+
+        reply = await run_step(examiner_agent, answer, session=examiner_session, agent_name="Examiner")
+        ui.agent_output("Examiner", reply)
+
+        if "[✓]" in reply or "correct" in reply.lower():
             results['correct'] += 1
-        
-        results['answers'].append({
-            'question_num': question_num,
-            'answer': answer,
-            'feedback': reply
-        })
-        
-        print("\n" + "-" * 70)
-        
-        # Check if this is the last question
-        if question_num >= 15:
-            break
-    
-    # Get final summary from examiner
-    summary_prompt = """Provide the final exam summary:
-- MCQ Score: X/10
-- Open-ended Q&A: Brief assessment
+
+        results['answers'].append({'question_num': question_num, 'answer': answer, 'feedback': reply})
+
+    summary_prompt = f"""Summarize the exam results for {tasks.LEARNER['name']}:
+- MCQ Score: {results['correct']}/{EXAM_Q_COUNT}
 - Overall Performance
-- Skills that need more work"""
-    
-    final_summary = await run_step(examiner_agent, summary_prompt, session=examiner_session)
-    
-    print("\n" + "=" * 70)
-    print("[FINAL EXAM RESULTS]")
-    print("=" * 70)
-    print(final_summary)
-    print("=" * 70)
-    
+- Skills that need more work
+- Keep it short (3-4 sentences)"""
+
+    final_summary = await run_step(examiner_agent, summary_prompt, session=examiner_session, agent_name="Examiner")
+    ui.header("FINAL EXAM RESULTS")
+    ui.result_box(final_summary)
+    return final_summary
     return final_summary
 
 
-async def run_exam_old(context):
-    """OLD VERSION: Build the exam with 15 questions from JSON (kept as backup)"""
-    exam_prompt = build_prompt(task_examiner, context) + "\n\n" + EXAM_FORMAT_INSTRUCTIONS
-
-    raw = await run_step(examiner_agent, exam_prompt)
-    questions = parse_exam_json(raw)
-
-    if not questions or len(questions) < 10:
-        print("[WARNING] Couldn't build a proper exam this time — here's the raw result:\n")
-        print(raw)
-        return raw
-
-    print(f"[EXAM] Ready! {len(questions)} questions to test your knowledge.")
-    print("Mix of multiple-choice and open-ended questions.\n")
-
-    results = []
-    mcq_correct = 0
-    mcq_total = 0
-    
-    for i, q in enumerate(questions, start=1):
-        difficulty_emoji = {"easy": "[EASY]", "medium": "[MEDIUM]", "hard": "[HARD]"}.get(q.get('difficulty', 'medium').lower(), "[?]")
-        
-        print("\n" + "=" * 70)
-        print(f"\nQuestion {i}/{len(questions)} {difficulty_emoji} [{q.get('difficulty', 'medium').upper()}] — {q.get('skill', 'General')}")
-        print("-" * 70)
-        print(q.get("question", ""))
-
-        if q.get("type") == "mcq":
-            options = q.get("options", [])
-            print()
-            for idx, option in enumerate(options):
-                print(f"  {chr(65 + idx)}. {option}")
-
-            while True:
-                answer = input("\n👉 Your answer (A/B/C/D): ").strip().upper()
-                if answer in ['A', 'B', 'C', 'D']:
-                    break
-                print("[ERROR] Please enter A, B, C, or D")
-            
-            chosen = answer
-            correct_answer = q.get("correct_answer", "").strip().upper()
-            is_correct = (chosen == correct_answer)
-            
-            mcq_total += 1
-            if is_correct:
-                mcq_correct += 1
-                print("[✓] Correct!")
-            else:
-                print(f"[✗] Incorrect — the correct answer was: {correct_answer}")
-            
-            if q.get("explanation"):
-                print(f"[INFO] {q['explanation']}")
-
-            results.append({
-                "skill": q.get("skill", "General"),
-                "type": "mcq",
-                "difficulty": q.get("difficulty", "medium"),
-                "correct": is_correct,
-            })
-            
-        else:  # Q&A type
-            print("\n[OPEN-ENDED] This is an open-ended question. Provide a detailed answer.\n")
-            answer = input("[ANSWER] Your answer:\n> ").strip()
-            
-            results.append({
-                "skill": q.get("skill", "General"),
-                "type": "qa",
-                "difficulty": q.get("difficulty", "hard"),
-                "question": q.get("question", ""),
-                "model_answer": q.get("model_answer", ""),
-                "key_points": q.get("key_points", []),
-                "student_answer": answer,
-            })
-
-    # Grade Q&A answers using the Examiner agent with improved accuracy measurement
-    open_results = [r for r in results if r["type"] == "qa"]
-    grading_notes = ""
-    qa_scores = []
-    
-    if open_results:
-        print("\n" + "=" * 70)
-        print("🤖 Examiner is grading your open-ended answers...")
-        print("=" * 70)
-        
-        grading_prompt = """Grade each student answer based on the model answer and key points. For each question:
-
-1. Compare the student's answer to the model answer
-2. Check if key points are covered
-3. Assign a score from 0-100%
-4. Provide brief feedback
-
-Return your grading in this format for each question:
-
-Question [number]:
-Score: [0-100]%
-Accuracy: [Excellent/Good/Fair/Poor]
-Feedback: [Brief explanation of what was good and what was missing]
-
----
-
-"""
-        
-        for idx, r in enumerate(open_results, 1):
-            grading_prompt += f"""
-Question {idx}: {r['question']}
-
-Model Answer: {r['model_answer']}
-
-Key Points to Cover: {', '.join(r['key_points'])}
-
-Student Answer: {r['student_answer']}
-
----
-"""
-        
-        grading_notes = await run_step(examiner_agent, grading_prompt)
-        
-        # Parse scores from grading notes
-        import re
-        score_matches = re.findall(r'Score:\s*(\d+)', grading_notes)
-        for score_str in score_matches:
-            qa_scores.append(int(score_str))
-        
-        print("\n" + grading_notes)
-
-    # Calculate overall scores
-    print("\n" + "=" * 70)
-    print("[EXAM RESULTS]")
-    print("=" * 70)
-    
-    # MCQ scores
-    mcq_percentage = int((mcq_correct / mcq_total) * 100) if mcq_total > 0 else 0
-    print(f"\n[MCQ] Multiple Choice: {mcq_correct}/{mcq_total} ({mcq_percentage}%)")
-    
-    # Q&A scores
-    if qa_scores:
-        avg_qa_score = sum(qa_scores) / len(qa_scores)
-        print(f"[Q&A] Open-Ended: {avg_qa_score:.0f}% average accuracy")
-    else:
-        avg_qa_score = 0
-    
-    # Overall score
-    if mcq_total > 0 and qa_scores:
-        overall_score = (mcq_percentage * 0.6) + (avg_qa_score * 0.4)  # 60% MCQ, 40% Q&A
-    elif mcq_total > 0:
-        overall_score = mcq_percentage
-    else:
-        overall_score = avg_qa_score
-    
-    print(f"\n[SCORE] Overall: {overall_score:.0f}%")
-    
-    # Difficulty breakdown
-    print("\n[ANALYSIS] Performance by Difficulty:")
-    for difficulty in ["easy", "medium", "hard"]:
-        diff_results = [r for r in results if r.get("difficulty") == difficulty and r["type"] == "mcq"]
-        if diff_results:
-            diff_correct = sum(1 for r in diff_results if r["correct"])
-            diff_total = len(diff_results)
-            diff_pct = int((diff_correct / diff_total) * 100)
-            marker = {"easy": "[EASY]", "medium": "[MEDIUM]", "hard": "[HARD]"}[difficulty]
-            print(f"  {marker} {difficulty.upper()}: {diff_correct}/{diff_total} ({diff_pct}%)")
-    
-    # Skill-wise scores
-    skill_scores = {}
-    for r in results:
-        if r["type"] == "mcq":
-            skill_scores.setdefault(r["skill"], []).append(r["correct"])
-
-    print("\n[ANALYSIS] Performance by Skill:")
-    summary_lines = []
-    for skill, outcomes in skill_scores.items():
-        pct = (sum(outcomes) / len(outcomes)) * 100
-        flag = " — [!] flagged for more teaching" if pct < 60 else ""
-        print(f"  • {skill}: {pct:.0f}%{flag}")
-        summary_lines.append(f"{skill}: {pct:.0f}%{flag}")
-
-    if grading_notes:
-        summary_lines.append(f"\nOpen-ended Q&A feedback:\n{grading_notes}")
-    
-    print("\n" + "=" * 70)
-
-    return "\n".join(summary_lines)
-
-
-# ---------------------------------------------------------------------------
-# Main session
-# ---------------------------------------------------------------------------
+# ── Main Session ──────────────────────────────────────────────────────────
 
 async def run_studymate():
-    # Choose custom or demo mode
     mode = choose_mode()
-    
     memory = {}
 
-    print("\n" + "=" * 60)
-    print("        STUDYMATE AI — MULTI AGENT SYSTEM")
-    print("=" * 60)
+    ui.separator()
+    ui.info(f"Launching multi-agent system for {tasks.LEARNER['name']}...")
 
-    # ---------- CEO: Welcome ----------
-    print_header("[CEO] Welcome")
-    ceo_session = ceo_agent.create_session()
-    memory["ceo_intro"] = await run_step(ceo_agent, build_prompt(task_ceo), session=ceo_session)
-    print(memory["ceo_intro"])
-
-    # ---------- Profiler Agent: a real conversation ----------
-    print_header(f"[Profiler Agent] Getting to know {tasks.LEARNER['name']}")
+    # ── Profiler ──
+    ui.header(f"PROFILER — Getting to know {tasks.LEARNER['name']}")
     profiler_session = profiler_agent.create_session()
-    reply = await run_step(profiler_agent, build_prompt(task_profiler), session=profiler_session)
-    print(reply)
-    print("\n(Reply below to keep chatting — type 'done' when you're ready to move on.)")
+    reply = await run_step(profiler_agent, build_prompt(task_profiler), session=profiler_session, agent_name="Profiler")
+    ui.agent_output("Profiler", reply)
+    ui.info("Reply below — type 'done' when ready to move on.\n")
 
     for _ in range(4):
-        student_reply = input("\nYou: ").strip()
+        student_reply = ui.input_prompt("You").strip()
         if not student_reply or student_reply.lower() in ("done", "skip", "next"):
             break
-        reply = await run_step(profiler_agent, student_reply, session=profiler_session)
-        print("\n" + reply)
+        reply = await run_step(profiler_agent, student_reply, session=profiler_session, agent_name="Profiler")
+        ui.agent_output("Profiler", reply)
 
     memory["profile"] = await run_step(
         profiler_agent,
         "In 2-3 sentences, summarize this student's motivation, mindset, and "
         "what direction we should set for their learning journey. This is for "
         "the next agent, not the student — no greetings, just the summary.",
-        session=profiler_session,
+        session=profiler_session, agent_name="Profiler",
     )
 
-    # ---------- Knowledge Checker ----------
+    # ── Knowledge Checker ──
     assessment_results = await run_knowledge_assessment()
     memory["knowledge"] = assessment_results["summary"]
 
-    # ---------- Learning Path Agent ----------
-    print_header("[Learning Path Agent] Resources for you")
+    # ── Learning Path ──
+    ui.header("LEARNING PATH")
     memory["learning_path"] = await run_step(
-        learning_path_agent, build_prompt(task_learning_path, memory["knowledge"])
+        learning_path_agent, build_prompt(task_learning_path, memory["knowledge"]),
+        agent_name="Learning Path"
     )
-    print(memory["learning_path"])
-    
-    # Ask user to continue
-    print("\n" + "=" * 60)
-    continue_input = input("\n[NEXT] Continue to Adaptive Planner? (yes/no): ").strip().lower()
-    if continue_input not in ['yes', 'y']:
-        print("\n[PAUSED] Session paused. Run again to continue from here.")
+    ui.display_learning_path(memory["learning_path"])
+
+    cont = ui.input_prompt("Continue to Adaptive Planner? (yes/no)").strip().lower()
+    if cont not in ['yes', 'y']:
+        ui.warn("Session paused.")
         return
 
-    # ---------- Adaptive Planner ----------
-    print_header("[Adaptive Planner] Your study schedule")
+    # ── Adaptive Planner ──
+    ui.header("ADAPTIVE PLANNER")
     planner_session = adaptive_planner.create_session()
-    
-    # Agent asks first question
-    reply = await run_step(adaptive_planner, build_prompt(task_adaptive_plan, memory["learning_path"]), session=planner_session)
-    print(reply)
-    
-    # Interactive Q&A - agent will ask 3 questions one by one
+    reply = await run_step(adaptive_planner, build_prompt(task_adaptive_plan, memory["learning_path"]), session=planner_session, agent_name="Adaptive Planner")
+    ui.agent_output("Adaptive Planner", reply)
+
     questions_answered = 0
-    max_questions = 5  # Allow up to 5 exchanges
-    
-    for _ in range(max_questions):
-        student_reply = input("\n> ").strip()
+    for _ in range(5):
+        student_reply = ui.input_prompt("").strip()
         if not student_reply:
-            print("[WARNING] Please provide an answer.")
+            ui.warn("Please provide an answer.")
             continue
-            
-        reply = await run_step(adaptive_planner, student_reply, session=planner_session)
-        print("\n" + reply)
-        
+        reply = await run_step(adaptive_planner, student_reply, session=planner_session, agent_name="Adaptive Planner")
+        ui.agent_output("Adaptive Planner", reply)
         questions_answered += 1
-        
-        # Check if schedule is ready (contains time/hours/days keywords)
         if any(word in reply.lower() for word in ["schedule", "daily study time", "best time:", "skip days:"]):
             break
-        
         if questions_answered >= 3:
-            # Force schedule creation
-            final_prompt = "Based on my answers, please create my 1-week study schedule now."
-            reply = await run_step(adaptive_planner, final_prompt, session=planner_session)
-            print("\n" + reply)
+            reply = await run_step(adaptive_planner, "Based on my answers, please create my 1-week study schedule now.", session=planner_session, agent_name="Adaptive Planner")
+            ui.agent_output("Adaptive Planner", reply)
             break
-    
+
     memory["plan"] = reply
 
-    # ========== ADAPTIVE LEARNING LOOP ==========
-    # Keep teaching and testing until student passes (score >= 80%)
-    max_iterations = 5  # Prevent infinite loops
+    # ── Adaptive Learning Loop ──
+    max_iterations = 5
     iteration = 0
-    passing_score = 80  # Student needs 80% to pass
-    
-    weak_skills = []  # Track which skills need work
-    
+    passing_score = 80
+    weak_skills = []
+    ceo_session = ceo_agent.create_session()
+
     while iteration < max_iterations:
         iteration += 1
-        
-        print("\n" + "=" * 60)
-        print(f"[LEARNING CYCLE {iteration}]")
-        print("=" * 60)
-        
-        # ---------- Teaching Agent: comprehension-check loop ----------
-        print_header(f"[Teaching Agent] Teaching Session #{iteration}")
+        ui.header(f"LEARNING CYCLE {iteration}")
+
+        # Teaching Agent
+        ui.header(f"TEACHING SESSION #{iteration}")
+        ui.info("One topic at a time. [doubt] to ask questions, [next] to continue.\n")
         teaching_session = teaching_agent.create_session()
-        
-        # Focus on weak skills if this is a retry
+
         if weak_skills:
-            focus_prompt = f"The student struggled with these skills: {', '.join(weak_skills)}. Focus your teaching on these areas specifically. Teach the concepts they're missing."
+            focus_prompt = f"Weak skills to teach (in order): {', '.join(weak_skills)}."
         else:
             focus_prompt = memory["knowledge"]
-        
-        reply = await run_step(
-            teaching_agent, build_prompt(task_teaching, focus_prompt), session=teaching_session
-        )
-        print(reply)
 
-        for attempt in range(3):
-            understanding = input("\nDid that make sense? (yes / no / somewhat): ").strip().lower()
-            if understanding.startswith("y"):
-                break
-            reply = await run_step(
-                teaching_agent,
-                f"The student said '{understanding}' — that didn't fully land. "
-                f"Teach the same concept again from a different angle: a new "
-                f"example, a different analogy, or a simpler breakdown.",
-                session=teaching_session,
-            )
-            print("\n" + reply)
-        else:
-            print("\n(Let's keep this in mind and come back to it after the test.)")
+        reply = await run_step(teaching_agent, build_prompt(task_teaching, focus_prompt), session=teaching_session, agent_name="Teaching Agent")
+        ui.agent_output("Teaching Agent", reply)
+
+        teaching_complete = False
+        while not teaching_complete:
+            ui.teaching_options()
+            choice = ui.input_prompt("Your choice (doubt / next)").strip().lower()
+
+            if choice in ("doubt", "d"):
+                doubt_input = ui.input_prompt("Describe your doubt (or 'cancel')").strip()
+                if doubt_input.lower() == "cancel":
+                    continue
+                reply = await run_step(teaching_agent, f"I have a doubt: {doubt_input}", session=teaching_session, agent_name="Teaching Agent")
+                ui.agent_output("Teaching Agent", reply)
+
+                while True:
+                    satisfied = ui.input_prompt("Is your doubt cleared? (yes / no)").strip().lower()
+                    if satisfied.startswith("y"):
+                        break
+                    elif satisfied.startswith("n"):
+                        more_input = ui.input_prompt("What's still unclear? (or 'cancel')").strip()
+                        if more_input.lower() == "cancel":
+                            break
+                        reply = await run_step(
+                            teaching_agent,
+                            f"I'm still confused about: {more_input}. Please explain differently with another example.",
+                            session=teaching_session, agent_name="Teaching Agent"
+                        )
+                        ui.agent_output("Teaching Agent", reply)
+                    else:
+                        ui.warn("Please answer 'yes' or 'no'")
+
+            elif choice in ("next", "n"):
+                reply = await run_step(teaching_agent, "I understand this topic. Go to the NEXT topic.", session=teaching_session, agent_name="Teaching Agent")
+                ui.agent_output("Teaching Agent", reply)
+                if "all topics complete" in reply.lower():
+                    teaching_complete = True
+                    ui.ok("All weak skills have been taught!")
+            else:
+                ui.warn("Please type 'doubt' or 'next'")
 
         memory["teaching"] = reply
 
-        # ---------- Examiner Agent: Interactive exam ----------
+        # Examiner
         memory["exam"] = await run_exam_interactive()
 
-        # ---------- Manager Insights: Analyze performance ----------
-        print_header("[Manager Insights] Performance Analysis")
+        # Manager Insights
+        ui.header("MANAGER INSIGHTS")
         memory["insights"] = await run_step(
             manager_insights_agent,
             build_prompt(task_manager_insights, f"{memory['exam']}\n\nIteration: {iteration}"),
+            agent_name="Manager Insights"
         )
-        print(memory["insights"])
-        
-        # ---------- CEO Decision: Continue or advance? ----------
-        print_header(f"[CEO] Decision - Cycle {iteration}")
-        
-        # Parse exam score from insights (look for percentage)
-        import re
+        ui.result_box(memory["insights"])
+
+        # CEO Decision
+        ui.header(f"CEO DECISION - Cycle {iteration}")
         score_match = re.search(r'(\d+)%', memory["insights"])
         current_score = int(score_match.group(1)) if score_match else 0
-        
-        # Extract weak skills from insights
+
         weak_skills = []
         if "weak" in memory["insights"].lower() or "struggle" in memory["insights"].lower():
-            # Parse skill names from insights
             for skill in tasks.CERT['skills']:
                 if skill.lower() in memory["insights"].lower():
                     weak_skills.append(skill)
-        
-        decision_prompt = f"""Iteration {iteration} complete. 
-        
+
+        decision_prompt = f"""Iteration {iteration} complete.
+
 Student score: {current_score}%
 Weak skills: {', '.join(weak_skills) if weak_skills else 'None identified'}
 
@@ -803,28 +476,23 @@ Make your decision:
 - If score < 80% or weak skills exist: Say we'll do another teaching cycle on [specific skills]
 
 Keep response SHORT (2-3 sentences)."""
-        
-        ceo_decision = await run_step(ceo_agent, decision_prompt, session=ceo_session)
-        print(ceo_decision)
-        
-        # Check if student passed
+
+        ceo_decision = await run_step(ceo_agent, decision_prompt, session=ceo_session, agent_name="CEO")
+        ui.agent_output("CEO", ceo_decision)
+
         if current_score >= passing_score and not weak_skills:
-            print("\n" + "=" * 60)
-            print("[✓] STUDENT PASSED! Moving to final decision...")
-            print("=" * 60)
+            ui.header("STUDENT PASSED")
             break
         else:
-            print("\n" + "=" * 60)
-            print(f"[PROGRESS] Score: {current_score}% - Below passing score ({passing_score}%)")
+            ui.score_display(current_score, 100, "Current Score")
             if weak_skills:
-                print(f"[FOCUS] Will focus on: {', '.join(weak_skills)}")
-            print(f"[CYCLE] Starting Learning Cycle {iteration + 1}...")
-            print("=" * 60)
-            await asyncio.sleep(2)  # Brief pause before next cycle
-    
-    # ---------- Final CEO Decision ----------
-    print_header("[CEO] Final Decision")
-    final_decision_prompt = f"""Final session complete after {iteration} learning cycle(s).
+                ui.info(f"Focusing on: {', '.join(weak_skills)}")
+            ui.info(f"Starting Learning Cycle {iteration + 1}...")
+            await asyncio.sleep(2)
+
+    # Final CEO Decision
+    ui.header("FINAL DECISION")
+    final_prompt = f"""Final session complete after {iteration} learning cycle(s).
 
 Student's journey:
 - Final score: {current_score}%
@@ -833,13 +501,12 @@ Student's journey:
 
 Provide your final decision and next steps for {tasks.LEARNER['name']}.
 Keep it SHORT and encouraging (2-3 sentences)."""
-    
-    memory["ceo_decision"] = await run_step(ceo_agent, final_decision_prompt, session=ceo_session)
-    print(memory["ceo_decision"])
 
-    print("\n" + "=" * 60)
-    print("        STUDYMATE AI — SESSION COMPLETE")
-    print("=" * 60)
+    memory["ceo_decision"] = await run_step(ceo_agent, final_prompt, session=ceo_session, agent_name="CEO")
+    ui.result_box(memory["ceo_decision"])
+
+    ui.header("SESSION COMPLETE")
+    ui.ok("Thank you for using StudyMate AI!")
 
 
 if __name__ == "__main__":
