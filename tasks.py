@@ -215,26 +215,32 @@ Based on their role, make a warm guess about motivation and set the tone. Keep u
 
 task_knowledge_checker = {
     "description": lambda: f"""
-    You have search results above for {LEARNER['certification']}. Use them as your ONLY source.
+    Search results contain REAL PAST EXAM PAPERS for {LEARNER['certification']}. Use them as your ONLY source.
 
     Certification: {LEARNER['certification']}
     Skills to consider: {CERT['skills']}
 
-    Look at the search results and IDENTIFY the actual topics, services, and concepts mentioned there.
-    Create 10 multiple-choice questions (MCQs) about those specific topics:
-    - 3-4 questions per major topic area found in the search results
-    - Each question should have 4 options (A, B, C, D) — all plausible and specific
-    - One correct answer per question
-    - Use the skill/topic names as they appear in the search results
-    - Questions must be based ONLY on the search results provided
+    STEP 1 — ANALYZE THE PAST PAPERS:
+    Look at the REAL exam questions found in the search results. Study:
+    - The FORMAT of each question (how they're worded)
+    - The STYLE of the options (length, specificity, distractors)
+    - The DIFFICULTY level of each question
+    - The TOPICS and CONCEPTS tested
+    
+    STEP 2 — GENERATE MATCHING QUESTIONS:
+    Create 10 NEW multiple-choice questions that MATCH the exact format, style, and difficulty of the past papers.
 
     QUALITY REQUIREMENTS — Non-negotiable:
-    1. SCENARIO-BASED: Frame questions as real-world scenarios ("An engineer needs to...") not definitions
-    2. SPECIFIC: Every question must reference a concrete service, tool, command, or concept
-    3. NO generic questions like "What is X?" or "Define Y" — these will be rejected
-    4. NO True/False or Yes/No option pairs — all 4 options must be genuine alternatives
-    5. AT LEAST 6 questions must name a specific technology (e.g., "EC2", "Kubernetes", "IAM Role")
-    6. OPTIONS must be realistic and specific — not "All of the above" or "None of the above"
+    1. Your questions MUST look like they came from the same exam as the past papers you found
+    2. SCENARIO-BASED: Frame questions as real-world scenarios like real exams do
+    3. SPECIFIC: Every question must reference a concrete service, tool, command, or concept
+    4. NO generic questions like "What is X?" or "Define Y" — real exams don't ask like this
+    5. NO True/False or Yes/No option pairs — all 4 options must be genuine alternatives
+    6. AT LEAST 6 questions must name a specific technology (e.g., "EC2", "Kubernetes", "IAM Role")
+    7. OPTIONS must be realistic and specific — not "All of the above" or "None of the above"
+    8. The DIFFICULTY, WORDING LENGTH, and OPTION STRUCTURE must match the past papers
+
+    If search results are generic or don't contain real exam questions, search AGAIN specifically for "{LEARNER['certification']} past exam questions" or "{LEARNER['certification']} question paper".
 
     CRITICAL: Return ONLY valid JSON in this EXACT format (no markdown, no code fences, no extra text):
 
@@ -253,7 +259,7 @@ task_knowledge_checker = {
 
     The system will present these questions one by one to the student.
     """,
-    "expected_output": "JSON object with 10 MCQ questions based on search results, each with id, skill, question text, 4 options, correct answer (A/B/C/D), and explanation."
+    "expected_output": "JSON object with 10 MCQ questions that match the style of real past exam papers, each with id, skill, question text, 4 options, correct answer (A/B/C/D), and explanation."
 }
 
 task_learning_path = {
@@ -329,27 +335,39 @@ task_teaching = {
 
 task_examiner = {
     "description": lambda: f"""
-    You have search results above with real {LEARNER['certification']} exam content. Use them as your ONLY source.
+    Search results contain REAL PAST EXAM PAPERS for {LEARNER['certification']}. Use them as your ONLY source.
 
     Certification: {LEARNER['certification']}
     Skills in scope: {CERT['skills']}
 
-    Look at the search results and IDENTIFY the specific topics, services, and concepts mentioned.
-    Create exactly 15 questions based STRICTLY on those topics:
-    - 5 EASY questions (multiple choice) — about basic concepts from search results
-    - 5 MEDIUM questions (multiple choice) — about deeper topics from search results
-    - 5 HARD questions (open-ended Q&A style) — about complex scenarios from search results
+    STEP 1 — ANALYZE THE PAST PAPERS:
+    Study the REAL exam questions found in the search results carefully:
+    - What FORMAT do they use? (scenario-based, technical, etc.)
+    - What STYLE of wording? (length, technical depth)
+    - What DIFFICULTY distribution? (easy vs hard topics)
+    - What TYPES of options? (specific services, numbers, commands)
+    
+    STEP 2 — CREATE MATCHING QUESTIONS:
+    Create exactly 10 questions that MATCH the EXACT style and format of the past papers:
+    - 3 EASY questions — same difficulty and format as easy past paper questions
+    - 4 MEDIUM questions — same difficulty and format as medium past paper questions
+    - 3 HARD questions — same difficulty and format as hard past paper questions
 
-    For MCQ questions:
-    - Each has 4 options (A, B, C, D)
+    For each question:
+    - Use the SAME wording style and complexity as real past exam questions
+    - Each has 4 options (A, B, C, D) — all plausible, like real exam options
     - One correct answer
     - Brief explanation
     - Skill name should match what appears in search results
 
-    For Q&A questions:
-    - Open-ended question requiring detailed answer
-    - Provide a model answer for comparison
-    - Specify key points that should be covered
+    CRITICAL RULES:
+    - Questions MUST look like they're from the SAME exam as the past papers you found
+    - NEVER ask "What is X" or "Define Y" — real exams don't use this format
+    - Scenario-based only — like real certification exams
+    - NO "All of the above" / "None of the above" options
+    - NO True/False or Yes/No pairs
+
+    If search results don't contain real exam questions, search again specifically for "{LEARNER['certification']} previous year question paper".
 
     CRITICAL: Return ONLY valid JSON in this EXACT format (no markdown, no code fences):
 
@@ -360,26 +378,23 @@ task_examiner = {
           "type": "mcq",
           "difficulty": "easy",
           "skill": "Topic from search results",
-          "question": "Question about that topic?",
+          "question": "Scenario-based question matching past paper style?",
           "options": ["Option A", "Option B", "Option C", "Option D"],
           "correct_answer": "B",
           "explanation": "Brief explanation"
         }},
         {{
           "id": 11,
-          "type": "qa",
+          "type": "open-ended",
           "difficulty": "hard",
           "skill": "Topic from search results",
-          "question": "Explain a concept from the search results?",
-          "model_answer": "Detailed model answer",
-          "key_points": ["Point 1", "Point 2", "Point 3"]
+          "question": "Complex scenario question?",
+          "model_answer": "Key points that should be covered"
         }}
       ]
     }}
 
-    Label each question with the skill/topic name as it appears in search results. After scoring, flag any skill where the student scored below 60% for more teaching.
-    """,
-    "expected_output": "JSON with 15 questions based on search results (10 MCQ: 5 easy + 5 medium, 5 Q&A: hard), each labeled with difficulty and skill, with answers and explanations."
+    Present each question ONE AT A TIME to the student."""
 }
 
 

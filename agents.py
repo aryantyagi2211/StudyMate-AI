@@ -163,7 +163,6 @@ class SimpleAgent:
     def _build_search_query(self, prompt: str) -> str:
         cert = self._extract_cert(prompt)
         if not cert:
-            # Try to get cert from LEARNER data (always more reliable)
             try:
                 import tasks
                 if tasks.LEARNER and tasks.LEARNER.get('certification'):
@@ -171,20 +170,19 @@ class SimpleAgent:
             except ImportError:
                 pass
         if not cert:
-            # Ultra fallback: extract key terms from prompt
             words = [w for w in prompt.split() if w.isupper() and len(w) > 2][:5]
             if words:
                 return f"{' '.join(words)} exam certification study guide 2026"
             return f"certification exam topics study guide 2026"
-        base = f"{cert} 2026"
+        base = f"{cert} exam"
         if self.name == "Knowledge Checker":
-            return f"{base} exam topics skills breakdown practice questions"
+            return f"{base} past exam questions real exam paper questions answers 2024 2025 2026"
         elif self.name == "Examiner Agent":
-            return f"{base} real exam questions practice test sample questions"
+            return f"{base} previous year question paper real exam dumps sample questions 2024 2025"
         elif "teach" in prompt.lower() or "learn" in prompt.lower():
-            return f"{base} concepts tutorial documentation guide"
+            return f"{cert} concepts tutorial documentation guide"
         else:
-            return f"{base} latest updates certification guide"
+            return f"{cert} certification guide 2026"
 
     async def _perform_search(self, query: str) -> str:
         """Do multiple targeted searches and combine results for richer context"""
@@ -200,15 +198,15 @@ class SimpleAgent:
                 except ImportError:
                     pass
 
-            # Always do multiple targeted searches
+            # Always do multiple targeted searches — focus on past exam papers
             searches = [query]
             if cert:
-                searches.append(f"{cert} exam topics skills breakdown")
-                searches.append(f"{cert} study guide real questions")
+                searches.append(f"{cert} question paper previous year exam 2024 2025")
+                searches.append(f"{cert} exam dumps real questions actual test")
+                searches.append(f"{cert} sample questions answers practice test")
             else:
-                # For unknown certs, search from multiple angles
-                searches.append(f"{query} concepts topics overview")
-                searches.append(f"{query} study guide practice questions")
+                searches.append(f"{query} past exam papers previous year questions")
+                searches.append(f"{query} sample test questions answers")
 
             all_results = []
             for q in searches:
@@ -400,25 +398,27 @@ knowledge_checker = SimpleAgent(
     enable_tools=True,
     instructions="""You are the Knowledge Checker. Your job is to test what the student already knows.
 
-SEARCH RESULTS ARE PROVIDED ABOVE. They contain certification topics, exam domains, services, and concepts for this exam.
+SEARCH RESULTS CONTAIN REAL PAST EXAM PAPERS AND QUESTIONS for this certification.
 
-YOUR TASK:
-1. SCAN the search results for SPECIFIC TECHNICAL TOPICS — services (e.g. EC2, S3, Lambda, Azure Functions), concepts (e.g. IAM, VPC, Blob Storage), and architectural patterns
-2. Create 10 MCQs that test knowledge of those SPECIFIC TECHNICAL TOPICS
-3. Each question must be about a concrete technology, service, or concept mentioned in the search results — NOT about the exam itself, study guides, or certification process
-4. Skill names must be the actual service/concept name (e.g. "Amazon EC2", "Azure Functions", "IAM") — NOT "AWS Exam" or "Certification"
+YOUR PROCESS:
+1. FIRST — Analyze the REAL exam questions found in the search results. Study their format, difficulty level, question style, and how options are structured.
+2. SECOND — Identify the SPECIFIC TECHNICAL TOPICS tested in those past papers (e.g. EC2, S3, Lambda, IAM, VPC, specific services, commands, concepts).
+3. THIRD — Create 10 NEW MCQs that MATCH the EXACT format, style, and difficulty of the real past exam questions you found.
 
-QUALITY RULES — Strictly follow these:
-- Questions MUST be scenario-based: "A developer needs to deploy 50 microservices with auto-scaling. Which service is BEST?" NOT "What is AWS?"
-- NEVER start a question with "What is", "Define", "Explain", "What are" — these are vague
-- Each option must be a REAL, plausible technology answer — not obviously wrong
-- Prefer questions about specific features, limitations, or comparisons
-- If search results are generic, search MORE SPECIFICALLY: look for actual exam dumps, skill breakdowns, and service documentation
+RULES — Strictly follow these:
+- Your questions must MIMIC the real exam — same complexity, same type of wording, same kind of options
+- Questions MUST be scenario-based like real exams: "A developer needs to deploy 50 microservices with auto-scaling. Which service is BEST?" NOT "What is AWS?"
+- NEVER start a question with "What is", "Define", "Explain", "What are" — real exams don't ask like that
+- Each option must be a REAL, plausible technology answer — like real exam options
 - At least 6 of 10 questions must mention a specific technology/service name
-- NO True/False or Yes/No questions — always 4 genuine options
+- NO True/False or Yes/No questions — always 4 genuine options like real MCQs
+- Skill names must be the actual service/concept name (e.g. "Amazon EC2", "Azure Functions", "IAM") — NOT "AWS Exam" or "Certification"
+- The question difficulty, wording length, and option structure must MATCH what you see in the past papers
+
+If search results are generic or don't contain real exam questions, search AGAIN for actual past papers using the certification name + "past exam questions" or "question paper".
 
 Create exactly 10 multiple-choice questions (MCQs). Each question should:
-- Test a SPECIFIC SERVICE or CONCEPT found in the search results
+- Match the REAL EXAM style found in search results
 - Have 4 options (A, B, C, D) — all plausible, not obviously wrong
 - Have one correct answer
 - Include a brief explanation
@@ -549,34 +549,35 @@ examiner_agent = SimpleAgent(
     enable_tools=True,
     instructions="""You are the Examiner — fair, clear, and focused on testing what the student learned.
 
-SEARCH RESULTS ARE PROVIDED ABOVE. They contain real exam topics, services, and concepts for this certification.
+SEARCH RESULTS CONTAIN REAL PAST EXAM PAPERS AND QUESTIONS for this certification.
 
-YOUR TASK:
-1. SCAN search results for SPECIFIC TECHNICAL TOPICS — actual services, tools, concepts, and architectures
-2. Create 15 questions that test knowledge of those SPECIFIC TECHNICAL TOPICS
-3. Questions must be about CONCRETE TECHNOLOGIES (e.g. EC2, S3, Lambda, VPC, IAM, Azure Functions, Blob Storage) — NOT about the exam format, study guides, or certification process
+YOUR PROCESS:
+1. FIRST — Analyze the REAL past exam questions in the search results. Study the format, difficulty distribution, question style, option structure, and wording patterns.
+2. SECOND — Identify which SPECIFIC TECHNICAL TOPICS appear in those past papers.
+3. THIRD — Create NEW exam questions that MATCH the EXACT format, style, and difficulty of the real past papers.
 
-You will conduct a 15-question exam by asking questions ONE AT A TIME:
-- Questions 1-5: EASY multiple choice — basic knowledge of services found in search results
-- Questions 6-10: MEDIUM multiple choice — deeper concepts from search results
-- Questions 11-15: HARD open-ended — real-world scenarios using services from search results
+You will conduct a 10-question exam, all multiple choice, asking ONE AT A TIME:
+- Questions 1-3: EASY — match the style of easy questions from past papers
+- Questions 4-7: MEDIUM — match the style of medium questions from past papers  
+- Questions 8-10: HARD — match the style of hard questions from past papers
 
-For each MCQ:
+For each question:
 - State the difficulty level ([EASY] / [MEDIUM] / [HARD])
+- Your question MUST use the SAME style, complexity, and wording pattern as real past exam questions
 - Ask about a SPECIFIC SERVICE or CONCEPT from the search results
-- Provide 4 options labeled A, B, C, D
+- Provide 4 options labeled A, B, C, D (all plausible, like real exam options)
 - Wait for student's answer
-- Tell them if correct/incorrect
-- Give brief explanation
+- Tell them if correct/incorrect with brief explanation
 
-For open-ended questions:
-- State it's a detailed question
-- Ask about a real scenario using services found in search results
-- Wait for their answer
-- Provide detailed feedback
+CRITICAL RULES:
+- NEVER ask "What is X" or "Define Y" — real exams don't use this format
+- Questions MUST be scenario-based like real certification exams
+- Options must be specific and realistic — no "All of the above" / "None of the above"
+- The difficulty, wording, and structure MUST MIRROR what you see in the past exam papers
+- If search results don't contain real exam questions, search again specifically for past papers
 
-Ask ONE question at a time. Keep track of which question number you're on (1-15).
-After question 15, provide a final score summary with skill-by-skill breakdown."""
+Ask ONE question at a time. Keep track of which question number you're on (1-10).
+After question 10, provide a final score summary with skill-by-skill breakdown."""
 )
 
 
