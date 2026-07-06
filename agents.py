@@ -105,29 +105,35 @@ class SimpleAgent:
         """Extract certification code from prompt — works for ANY certification"""
         text = self.instructions + prompt
 
-        # 1. Known patterns: XXX-NNN or XXX-NNNN (AWS-SAA, AZ-204, DP-203, etc)
+        # 1. Numbered cert codes: AWS-SAA, AZ-204, DP-203, CLF-C01, etc
         match = re.search(r'([A-Z]{2,6}-\d{3,4})', text)
         if match:
             return match.group(1)
 
-        # 2. Cert codes where both parts are letters: AWS-SAA, GCP-PCA, AWS-DOP
-        match = re.search(r'([A-Z]{2,6}-[A-Z]{2,6})', text)
+        # 2. Any hyphenated cert name (wide range): AWS-SAA, TESTING-CLASSIFICATION, COMPTIA-SECURITY-PLUS
+        #    Must be at least 2 uppercase letters on each side, up to 20
+        match = re.search(r'([A-Z]{2,20}-[A-Z]{2,20}(?:-[A-Z]{2,20})?)', text)
         if match:
             return match.group(1)
 
-        # 3. "Certification:" line — capture the FULL cert name from prompt
+        # 3. Multi-word cert in "for X certification" pattern
+        match = re.search(r'for\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)+)\s+[Cc]ert', text)
+        if match:
+            return match.group(1).strip()
+
+        # 4. "Certification:" line — capture the FULL cert name from prompt
         match = re.search(r'[Cc]ertification\s*:\s*(.+?)(?:\r?\n|$)', text)
         if match:
             full = match.group(1).strip()
             words = full.split()[:5]
             return ' '.join(words)
 
-        # 4. "Cert:" shorthand
+        # 5. "Cert:" shorthand
         match = re.search(r'[Cc]ert\s*:\s*(.+)', text)
         if match:
             return match.group(1).strip().split()[0]
 
-        # 5. Known standalone cert names (any company) — fallback only
+        # 6. Known standalone cert names (any company) — fallback only
         known_certs = ['CISSP', 'PMP', 'CCNA', 'CCNP', 'COMPTIA', 'ITIL',
                        'TOGAF', 'CISM', 'CISA', 'CRISC', 'CEH', 'OSCP',
                        'CKA', 'CKAD', 'CKS', 'LFCS', 'RHCSA', 'RHCE',
@@ -157,10 +163,22 @@ class SimpleAgent:
     def _build_search_query(self, prompt: str) -> str:
         cert = self._extract_cert(prompt)
         if not cert:
-            return prompt[:150]
+            # Try to get cert from LEARNER data (always more reliable)
+            try:
+                import tasks
+                if tasks.LEARNER and tasks.LEARNER.get('certification'):
+                    cert = tasks.LEARNER['certification']
+            except ImportError:
+                pass
+        if not cert:
+            # Ultra fallback: extract key terms from prompt
+            words = [w for w in prompt.split() if w.isupper() and len(w) > 2][:5]
+            if words:
+                return f"{' '.join(words)} exam certification study guide 2026"
+            return f"certification exam topics study guide 2026"
         base = f"{cert} 2026"
         if self.name == "Knowledge Checker":
-            return f"{base} skills measured study guide exam topics"
+            return f"{base} exam topics skills breakdown practice questions"
         elif self.name == "Examiner Agent":
             return f"{base} real exam questions practice test sample questions"
         elif "teach" in prompt.lower() or "learn" in prompt.lower():
@@ -174,11 +192,23 @@ class SimpleAgent:
             from tools.web_search import web_search, format_search_results
 
             cert = self._extract_cert(query)
-            searches = [query]
+            if not cert:
+                try:
+                    import tasks
+                    if tasks.LEARNER and tasks.LEARNER.get('certification'):
+                        cert = tasks.LEARNER['certification']
+                except ImportError:
+                    pass
 
+            # Always do multiple targeted searches
+            searches = [query]
             if cert:
                 searches.append(f"{cert} exam topics skills breakdown")
-                searches.append(f"{cert} study guide practice questions")
+                searches.append(f"{cert} study guide real questions")
+            else:
+                # For unknown certs, search from multiple angles
+                searches.append(f"{query} concepts topics overview")
+                searches.append(f"{query} study guide practice questions")
 
             all_results = []
             for q in searches:
@@ -378,9 +408,18 @@ YOUR TASK:
 3. Each question must be about a concrete technology, service, or concept mentioned in the search results — NOT about the exam itself, study guides, or certification process
 4. Skill names must be the actual service/concept name (e.g. "Amazon EC2", "Azure Functions", "IAM") — NOT "AWS Exam" or "Certification"
 
+QUALITY RULES — Strictly follow these:
+- Questions MUST be scenario-based: "A developer needs to deploy 50 microservices with auto-scaling. Which service is BEST?" NOT "What is AWS?"
+- NEVER start a question with "What is", "Define", "Explain", "What are" — these are vague
+- Each option must be a REAL, plausible technology answer — not obviously wrong
+- Prefer questions about specific features, limitations, or comparisons
+- If search results are generic, search MORE SPECIFICALLY: look for actual exam dumps, skill breakdowns, and service documentation
+- At least 6 of 10 questions must mention a specific technology/service name
+- NO True/False or Yes/No questions — always 4 genuine options
+
 Create exactly 10 multiple-choice questions (MCQs). Each question should:
 - Test a SPECIFIC SERVICE or CONCEPT found in the search results
-- Have 4 options (A, B, C, D)
+- Have 4 options (A, B, C, D) — all plausible, not obviously wrong
 - Have one correct answer
 - Include a brief explanation
 

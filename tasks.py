@@ -223,10 +223,18 @@ task_knowledge_checker = {
     Look at the search results and IDENTIFY the actual topics, services, and concepts mentioned there.
     Create 10 multiple-choice questions (MCQs) about those specific topics:
     - 3-4 questions per major topic area found in the search results
-    - Each question should have 4 options (A, B, C, D)
+    - Each question should have 4 options (A, B, C, D) — all plausible and specific
     - One correct answer per question
     - Use the skill/topic names as they appear in the search results
     - Questions must be based ONLY on the search results provided
+
+    QUALITY REQUIREMENTS — Non-negotiable:
+    1. SCENARIO-BASED: Frame questions as real-world scenarios ("An engineer needs to...") not definitions
+    2. SPECIFIC: Every question must reference a concrete service, tool, command, or concept
+    3. NO generic questions like "What is X?" or "Define Y" — these will be rejected
+    4. NO True/False or Yes/No option pairs — all 4 options must be genuine alternatives
+    5. AT LEAST 6 questions must name a specific technology (e.g., "EC2", "Kubernetes", "IAM Role")
+    6. OPTIONS must be realistic and specific — not "All of the above" or "None of the above"
 
     CRITICAL: Return ONLY valid JSON in this EXACT format (no markdown, no code fences, no extra text):
 
@@ -235,8 +243,8 @@ task_knowledge_checker = {
         {{
           "id": 1,
           "skill": "Topic Name from Search Results",
-          "question": "Question about that specific topic?",
-          "options": ["Option A", "Option B", "Option C", "Option D"],
+          "question": "A developer is designing a system that needs X. Which service should they use?",
+          "options": ["Amazon EC2", "AWS Lambda", "Google Cloud Functions", "Azure App Service"],
           "correct_answer": "A",
           "explanation": "Brief explanation based on search results"
         }}

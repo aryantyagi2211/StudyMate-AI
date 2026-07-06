@@ -154,17 +154,123 @@ def to_option_text(value, options):
 
 # ── Knowledge Assessment ──────────────────────────────────────────────────
 
+KC_MAX_RETRIES = 3
+
+
+def _validate_question_quality(questions, cert_name):
+    """Check if generated questions are specific, relevant, and well-formed.
+    Returns {"passed": bool, "feedback": str} with specific improvement guidance."""
+    feedback = []
+    passed = True
+    cert_upper = cert_name.upper()
+
+    # Check 1: Enough questions
+    if len(questions) < 10:
+        feedback.append(f"Only {len(questions)} questions — need exactly 10.")
+
+    # Check 2: Each question has required fields and proper structure
+    vague_count = 0
+    binary_count = 0
+    short_count = 0
+
+    for i, q in enumerate(questions[:10]):
+        q_text = q.get("question", "").strip()
+        opts = q.get("options", [])
+        correct = q.get("correct_answer", "").strip().upper()
+
+        if not q_text or len(q_text) < 15:
+            short_count += 1
+            feedback.append(f"Q{i+1}: question too short or empty.")
+
+        if len(opts) < 4:
+            feedback.append(f"Q{i+1}: only {len(opts)} options, need 4.")
+
+        lower_opts = [o.lower().strip() for o in opts if o]
+        if len(lower_opts) >= 2 and (
+            set(lower_opts[:2]) == {"true", "false"}
+            or set(lower_opts[:2]) == {"yes", "no"}
+        ):
+            binary_count += 1
+            feedback.append(f"Q{i+1}: binary True/False or Yes/No options — needs genuine 4-option MCQ.")
+
+        if q_text.lower().startswith(("what is", "define", "explain", "what are")):
+            vague_count += 1
+
+    # Check 3: Not too many vague questions
+    if vague_count > 3:
+        feedback.append(
+            f"{vague_count} questions start with 'what is'/'define' etc. "
+            f"Make them scenario-based: 'An admin needs to... what should they use?'"
+        )
+
+    # Check 4: Questions reference actual cert-specific technology
+    specific_terms = ["service", "api", "function", "instance", "bucket",
+                      "policy", "role", "cluster", "container", "database",
+                      "network", "storage", "compute", "iam", "vpc", "s3",
+                      "lambda", "azure", "gcp", "aws"]
+    specific_count = sum(
+        1 for q in questions[:10]
+        if any(term in q.get("question", "").lower() for term in specific_terms)
+    )
+    if specific_count < 5 and len(questions) >= 5:
+        feedback.append(
+            "Questions are too generic — they don't reference specific technologies, "
+            "services, or scenarios from the certification. "
+            "Search for the ACTUAL exam topics and write questions about specific services."
+        )
+
+    if feedback:
+        passed = False
+
+    return {
+        "passed": passed,
+        "feedback": "\n".join(feedback) if feedback else "Questions meet quality standards."
+    }
+
+
 async def run_knowledge_assessment():
-    """Run the interactive knowledge checker with 10 MCQs presented one by one."""
+    """Run the interactive knowledge checker with quality validation loop.
+    Retries up to KC_MAX_RETRIES times, creating fresh sessions to force new
+    web searches each time until questions pass quality gates."""
     ui.header("KNOWLEDGE CHECKER")
 
-    assessment_prompt = build_prompt(task_knowledge_checker)
-    raw = await run_step(knowledge_checker, assessment_prompt, agent_name="Knowledge Checker")
-    questions = parse_mcq_json(raw)
+    questions = []
+    retries = 0
+    additional_instructions = ""
+
+    while retries < KC_MAX_RETRIES:
+        retries += 1
+        if retries > 1:
+            ui.info(f"Regenerating higher quality questions (attempt {retries}/{KC_MAX_RETRIES})...")
+
+        assessment_prompt = build_prompt(task_knowledge_checker)
+        if additional_instructions:
+            assessment_prompt += f"\n\n--- QUALITY FEEDBACK FROM PREVIOUS ATTEMPT ---\n{additional_instructions}\n\nUse this feedback to find BETTER search results and generate improved questions."
+
+        # Fresh session every retry — forces a new web search
+        kc_session = knowledge_checker.create_session()
+        raw = await run_step(knowledge_checker, assessment_prompt, session=kc_session, agent_name="Knowledge Checker")
+        questions = parse_mcq_json(raw)
+
+        if not questions or len(questions) < 5:
+            additional_instructions = (
+                "The previous output was not usable. Search the web for "
+                f"SPECIFIC {tasks.LEARNER['certification']} exam topics, "
+                f"services, and real exam questions. Generate exactly 10 "
+                f"well-structured MCQs with 4 options each."
+            )
+            continue
+
+        quality = _validate_question_quality(questions, tasks.LEARNER['certification'])
+        if quality["passed"]:
+            ui.ok(f"High-quality questions generated (attempt {retries})!")
+            break
+        else:
+            additional_instructions = quality["feedback"]
+            ui.warn(f"Quality check failed — {quality['feedback'][:80]}...")
 
     if not questions or len(questions) < 5:
-        ui.warn("Couldn't generate proper assessment. Raw response:")
-        print(raw)
+        ui.warn("Could not generate valid questions after multiple attempts. Using fallback.")
         return {"total": 0, "correct": 0, "percentage": 0, "skill_scores": {}}
 
     ui.ok(f"Assessment ready! {len(questions)} questions to test your knowledge.")
