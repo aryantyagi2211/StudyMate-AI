@@ -1,4 +1,6 @@
 <img width="1536" height="1024" alt="StudyMate AI" src="https://github.com/user-attachments/assets/21c91b88-b29e-4196-868f-1349b6ffcec6" />
+
+
 # 🧠 StudyMate AI - Reasoning Agents
 ### Multi-Step Reasoning AI That Personalizes Your Certification Prep Journey
 
@@ -143,7 +145,6 @@ This triggers the adaptive loop. The system keeps going until you're actually re
 ---
 
 ## The Adaptive Loop — Why This Matters
-<img width="1536" height="1024" alt="StudyMate AI" src="https://github.com/user-attachments/assets/a6ea6658-f9d1-4d34-8ecf-f7963f4b5a38" />
 
 ```
                             📋 INITIAL ASSESSMENT
