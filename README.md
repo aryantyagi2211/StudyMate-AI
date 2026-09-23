@@ -3,12 +3,10 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Microsoft Foundry](https://img.shields.io/badge/Microsoft-Foundry%20IQ-orange.svg)](https://www.microsoft.com/foundry)
 [![Groq](https://img.shields.io/badge/Powered%20by-Groq-black.svg)](https://groq.com)
 
-> **Microsoft Foundry Challenge 2026**  
-> **Track:** 🧠 Reasoning Agents | **Tool:** Microsoft Foundry IQ ✅  
-> 8 AI agents using **multi-step reasoning** to solve complex educational challenges
+> **StudyMate AI prototype**  
+> 8 AI agents using multi-step reasoning and optional SerpAPI web search
 
 **[Live Demo](#running-it-yourself)** • **[Documentation](#the-8-agents--what-each-one-does)** • **[Architecture](#multi-step-reasoning-architecture)**
 
@@ -23,15 +21,15 @@
 - ✅ Assesses knowledge gaps intelligently  
 - ✅ Teaches with adaptive strategies
 - ✅ Creates personalized schedules
-- ✅ Uses **Microsoft Foundry IQ** for grounded, cited content
+- ✅ Prioritizes configured official certification sources when web search is available
 - ✅ Implements **adaptive feedback loop** until mastery is achieved
 
 **Key Stats:**
 - 🤖 **8 Specialized Agents** working in orchestrated collaboration
 - 🔄 **Adaptive Loop System** - continues teaching until 85%+ mastery
 - 🎯 **28+ Reasoning Steps** per complete learning journey
-- 📚 **Foundry IQ Integration** for grounded knowledge retrieval
-- 🧪 **Zero Hallucination** - all content cited from Microsoft Learn
+- 📚 **Source references** are retained when web search returns results
+- ⚠️ **External search and model services are optional and can be unavailable**
 
 **Not a chatbot. A reasoning engine.**
 
@@ -188,77 +186,16 @@ StudyMate AI is a **loop** - you stay in it until you're genuinely prepared:
 
 ---
 
-## Microsoft Foundry IQ Integration
+## Knowledge Search
 
-This project uses **Microsoft Foundry IQ** as the intelligence layer for grounded knowledge retrieval:
+When `SERPAPI_KEY` is configured, agents can search the web for
+certification-specific material. Queries prioritize known official domains such
+as Microsoft Learn, AWS documentation, Google Cloud, Kubernetes, Cisco, and
+other certification owners.
 
-### What is Foundry IQ?
-
-Foundry IQ provides agentic knowledge retrieval with:
-- ✅ **Grounded, cited answers** from Microsoft Learn
-- ✅ **Semantic search** for better relevance than keywords
-- ✅ **Permission-aware** enterprise knowledge access
-- ✅ **Reduces AI hallucination** through verified sources
-
-### How We Use It:
-
-**Learning Path Agent** & **Teaching Agent** use Foundry IQ to:
-1. Search Microsoft Learn for certification-specific content
-2. Filter by certification (e.g., AZ-204)
-3. Return results with citations and relevance scores
-4. Ground all recommendations in authoritative sources
-
-**Example Flow:**
-```
-Student: "Find the latest Azure Functions tutorial"
-↓
-Agent detects keywords: "latest", "tutorial"
-↓
-Foundry IQ search: certification=AZ-204, query="Azure Functions tutorial"
-↓
-Returns: Microsoft Learn articles with 0.95 relevance score + citations
-↓
-Agent responds: "Based on Microsoft Learn (citation: https://learn...)..."
-```
-
-### Setup Foundry IQ:
-
-**Step 1: Create Azure Resources**
-1. Go to [Azure Portal](https://portal.azure.com)
-2. Create: **Azure AI Project** → Copy connection string
-3. Create: **Azure AI Search** (Free tier OK) → Copy endpoint + key
-4. Create search index: `microsoft-learn-index`
-
-**Step 2: Add to `.env`**
-```env
-# Existing
-GROQ_API_KEY=your_groq_key
-SERPAPI_KEY=your_serpapi_key
-
-# NEW: Foundry IQ
-AZURE_PROJECT_CONNECTION_STRING=your_connection_string
-AZURE_SEARCH_ENDPOINT=https://your-search.search.windows.net
-AZURE_SEARCH_KEY=your_search_key
-AZURE_SEARCH_INDEX=microsoft-learn-index
-```
-
-**Step 3: Test**
-```bash
-python tools/foundry_search.py
-```
-
-### Fallback Strategy:
-
-If Foundry IQ not configured:
-- Automatically falls back to SerpAPI (basic web search)
-- Still works, but without grounded citations
-- No breaking errors
-
-**Verbose Mode** shows which is active:
-```python
-teaching_agent.verbose = True
-# Output shows: [FOUNDRY IQ ACTIVE] True/False
-```
+Search results are retained with generated knowledge and learning-path output.
+If search is unavailable, the application does not create fake citations or
+pretend that an unsupported knowledge integration is active.
 
 ---
 
@@ -290,18 +227,48 @@ STEP 4 - DECIDE & EXECUTE:
 - ✅ **28+ reasoning steps** per complete student journey
 - ✅ **8 specialized agents** collaborating through reasoning
 - ✅ **Adaptive reasoning** - agents adjust based on responses
-- ✅ **Grounded reasoning** with Foundry IQ citations
+- ✅ **Grounded reasoning** with retained source references when search is available
 - ✅ **Visible reasoning** in verbose mode for demos
 
 ---
 
-## Microsoft IQ Integration
+## Workflow and State Model
 
-This project integrates with **Foundry IQ** as the intelligence layer:
+The application runs the following ordered stages:
 
-- Agent reasoning is grounded in certification-specific knowledge bases
-- Each agent's decision logic follows the Foundry IQ retrieval pattern: understand context → retrieve relevant information → reason → respond
-- The multi-agent orchestration follows Microsoft Agent Framework patterns for sequential and adaptive agent handoff
+`Profiler -> Knowledge -> Learning Path -> Planner -> Teaching -> Examiner -> Manager -> CEO -> Report Card`
+
+The adaptive portion repeats `Teaching -> Examiner -> Manager -> CEO` until the
+deterministic score reaches `85%` with no weak skills, or until the configured
+maximum cycle count is reached. Workflow state, score, weak skills, sources,
+and checkpoints are persisted in the versioned local session file.
+
+---
+
+## Saved Session Schema
+
+StudyMate stores resumable progress in a session-namespaced JSON file. Set
+`STUDYMATE_SESSION_ID` to a stable, unique value for each user or deployment;
+the value is hashed into the filename so sessions cannot read or overwrite
+each other's state. The current schema version is `1` and contains:
+
+- `schema_version`: integer schema identifier
+- `learner`: selected learner profile
+- `cert`: selected certification data
+- `memory`: workflow checkpoints, scores, sources, and agent outputs
+
+The application validates the version and required top-level fields before
+resuming a saved session. Schema migrations are intentionally separate from
+normal session execution. Corrupted, outdated, or structurally invalid saved
+state is reported and discarded so the learner can restart safely.
+
+For a local single-user run, the default session file remains
+`.studymate_session.json`. Concurrent users must provide different
+`STUDYMATE_SESSION_ID` values.
+
+Session and progress JSON files are local runtime data and are excluded from
+version control. The application intentionally uses these small files instead
+of adding a database, queue, or external persistence service.
 
 ---
 
@@ -313,7 +280,7 @@ This project integrates with **Foundry IQ** as the intelligence layer:
 | Agent Framework | Custom SimpleAgent class with session management |
 | Rate Limiting | Multi-key rotation + exponential backoff |
 | Data | Synthetic student profiles (no real PII) |
-| UI | Streamlit |
+| UI | Terminal UI and FastAPI/WebSocket browser UI |
 | Language | Python 3.10+ |
 
 ---
@@ -330,9 +297,8 @@ The agent architecture is model-agnostic. Swapping Groq for Azure OpenAI is a on
 
 **Prerequisites:**
 - Python 3.10+
-- Free Groq API key from [console.groq.com](https://console.groq.com)
-- (Optional) Azure resources for Foundry IQ
-- (Optional) SerpAPI key for web search fallback
+- At least one model provider key: `GROQ_API_KEY` or `ROUTER_API_KEY`
+- Optional `SERPAPI_KEY` for certification web search
 
 **Setup:**
 
@@ -349,42 +315,81 @@ pip install -r requirements.txt
 
 **Create a `.env` file:**
 ```env
-# Required
+# At least one model provider is required
 GROQ_API_KEY=your_groq_key
+# Or use OpenRouter instead:
+# ROUTER_API_KEY=your_openrouter_key
 
-# Optional but recommended for hackathon
-AZURE_PROJECT_CONNECTION_STRING=your_connection_string
-AZURE_SEARCH_ENDPOINT=https://your-search.search.windows.net
-AZURE_SEARCH_KEY=your_search_key
-AZURE_SEARCH_INDEX=microsoft-learn-index
-
-# Optional fallback
+# Optional web search
 SERPAPI_KEY=your_serpapi_key
+
+# Optional per-user session isolation
+STUDYMATE_SESSION_ID=unique-user-or-deployment-id
+
+# Optional adaptive-loop limit; defaults to 5
+STUDYMATE_MAX_LEARNING_CYCLES=5
+
+# Optional bounded external-service settings
+STUDYMATE_MODEL_TIMEOUT_SECONDS=45
+STUDYMATE_MODEL_MAX_RETRIES=3
+STUDYMATE_SEARCH_TIMEOUT_SECONDS=15
 ```
+
+The default cost is bounded by at most five adaptive learning cycles, three
+model attempts per call, and five search results per search request. Increase
+these limits only when the provider budget and rate limits have been reviewed.
 
 **Run:**
 ```bash
 # Terminal version
 python main.py
 
-# Web UI
-streamlit run app.py
-
-# Test Foundry IQ
-python tools/foundry_search.py
+# Browser UI
+uvicorn web_app:app --host 127.0.0.1 --port 8000
 ```
+
+Open `http://127.0.0.1:8000` for the browser UI. Run the test suite with:
+
+```bash
+python -m unittest discover -s tests -q
+```
+
+The web app exposes `GET /healthz` for process health and `GET /readyz` for
+model-provider readiness. Readiness reports provider names and never returns
+API keys or learner data.
+
+Model calls and SerpAPI requests use bounded timeouts and retry counts. Invalid
+provider configuration fails with an actionable startup/session error instead
+of silently falling back.
+
+The browser wrapper allows one active session per process. Use separate
+processes or deployments for concurrent users.
+
+### Minimal deployment and rollback
+
+1. Build or install the pinned environment with `pip install -r requirements.txt`.
+2. Configure secrets through the deployment environment, not source control.
+3. Start the service with `uvicorn web_app:app --host 127.0.0.1 --port 8000`.
+4. Verify `/healthz` and `/readyz` before accepting traffic.
+5. Keep the previous application version available. To roll back, stop the
+   current process, restore the previous code and dependency environment, and
+   restart it with the same session ID configuration.
+
+Runtime session files are local and excluded from version control. Back them up
+only through the deployment's protected storage process; do not copy them into
+logs, tickets, or public artifacts.
 
 **Enable Verbose Mode** (see reasoning in action):
 ```python
-# In main.py or app.py, add:
+# In agents.py, add:
 teaching_agent.verbose = True
 learning_path_agent.verbose = True
 
 # You'll see:
 # [MULTI-STEP REASONING]
 # STEP 1 - UNDERSTAND THE PROBLEM: ...
-# [FOUNDRY IQ SEARCH]
-# [GROUNDED RESULTS WITH CITATIONS]
+# [SEARCH RESULTS]
+# [RETAINED SOURCE REFERENCES]
 ```
 
 ---
@@ -396,14 +401,16 @@ studymate-ai/
 ├── agents.py          # All 8 agent definitions with multi-step reasoning
 ├── tasks.py           # Task prompts for each agent
 ├── main.py            # Terminal orchestrator
-├── app.py             # Streamlit web UI
+├── web_app.py         # FastAPI/WebSocket browser wrapper
+├── workflow.py        # Typed state, scoring, and orchestration rules
+├── ui.py              # Terminal UI rendering helpers
 ├── tools/
-│   ├── foundry_search.py    # Microsoft Foundry IQ integration
-│   ├── web_search.py        # SerpAPI fallback
+│   ├── web_search.py        # Optional SerpAPI search
 │   └── __init__.py
 ├── data/
 │   └── data.py        # Synthetic learner + certification data
-├── requirements.txt   # Includes Azure AI packages
+├── tests/             # Workflow, UI, recovery, and web tests
+├── requirements.txt   # Runtime dependencies
 ├── .env               # Your API keys (not committed)
 └── README.md          # This file
 ```
@@ -431,15 +438,19 @@ This project follows Microsoft Agents League security and compliance guidelines:
 
 ---
 
-## What's Next
+## Current Limitations
 
-The foundation is built. Here's what comes next:
-
-- **Real-time user input** — instead of demo profiles, you enter your own details
-- **Any certification** — currently AZ-204, AZ-400, DP-203 — expandable to any cert
-- **Microsoft 365 Work IQ integration** — use real calendar and meeting data for smarter scheduling
-- **Foundry IQ knowledge base** — upload your company's internal training docs and ground the agents in them
-- **Parent/manager dashboard** — visibility into team certification readiness
+- Model-provider availability depends on configured API keys and external
+  service uptime.
+- SerpAPI search is optional; when unavailable, the application does not
+  fabricate citations or source records.
+- The browser wrapper supports one active session per process because legacy
+  agent modules still contain process-level state.
+- Session persistence is lightweight local JSON, not a multi-node database.
+- Generated content is checked for certification and skill alignment, but it is
+  not an official exam or a substitute for the provider's current blueprint.
+- Custom certifications receive generated skill categories when no built-in
+  certification guide is available.
 
 ---
 
@@ -459,7 +470,6 @@ MIT License - feel free to use this project as a foundation for your own multi-a
 
 ## Acknowledgments
 
-- **Microsoft Foundry IQ** for providing grounded knowledge retrieval
 - **Groq** for lightning-fast LLM inference
 - **Microsoft Learn** for comprehensive certification resources
 - Built with passion for making certification prep smarter, not harder

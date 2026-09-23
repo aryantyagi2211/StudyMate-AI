@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StudyMate AI — Terminal</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: #0a0e0a;
+    color: #c0c0c0;
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    display: flex;
+  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #0d0d0d; }
+  ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: 220px;
+    min-width: 220px;
+    background: #0d0f0d;
+    border-right: 1px solid #1a3a1a;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    overflow-y: auto;
+  }
+  #sidebar .logo {
+    color: #00cc44;
+    font-size: 15px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #1a3a1a;
+    margin-bottom: 12px;
+  }
+  #sidebar .logo span { color: #33dd88; }
+  .side-section {
+    margin-bottom: 14px;
+  }
+  .side-section .label {
+    color: #558855;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .side-section .value {
+    color: #c0c0c0;
+    font-size: 13px;
+    word-break: break-word;
+  }
+  .side-section .value.empty { color: #444; font-style: italic; }
+  #sidebar .status-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  #sidebar .status-dot.active { background: #00cc44; box-shadow: 0 0 6px #00cc4488; }
+  #sidebar .status-dot.waiting { background: #ccaa00; }
+  #sidebar .status-dot.idle { background: #555; }
+  .side-status {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid #1a3a1a;
+    font-size: 12px;
+  }
+  .side-status .row { margin: 3px 0; }
+
+  /* ── Terminal ── */
+  #terminal-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #0a0e0a;
+    position: relative;
+  }
+  #workflow {
+    padding: 14px 20px 8px;
+    border-bottom: 1px solid #1a3a1a;
+    background: #0d110d;
+  }
+  .workflow-title {
+    color: #fff;
+    font-size: 15px;
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+  .workflow-title span { color: #00cc44; }
+  .agent-grid {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(105px, 1fr));
+    gap: 6px;
+  }
+  .agent-card {
+    min-height: 58px;
+    padding: 7px;
+    border: 1px solid #294029;
+    border-radius: 5px;
+    background: #111711;
+    color: #668866;
+    font-size: 11px;
+    text-align: center;
+    transition: border-color .2s, background .2s, color .2s;
+  }
+  .agent-card .number { display: block; color: #446644; font-size: 10px; }
+  .agent-card.active {
+    border-color: #00cc44;
+    background: #123018;
+    color: #fff;
+    box-shadow: 0 0 8px #00cc4433;
+  }
+  .agent-card.done { border-color: #39704a; color: #8ac99a; }
+  .mastery-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    color: #888;
+    font-size: 11px;
+  }
+  .mastery-track { flex: 1; height: 6px; background: #263326; border-radius: 4px; overflow: hidden; }
+  #mastery-fill { height: 100%; width: 0%; background: #00cc44; transition: width .3s; }
+  #mastery-value { color: #33dd88; min-width: 38px; text-align: right; }
+  #terminal {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px 8px;
+    scroll-behavior: smooth;
+  }
+  #terminal::-webkit-scrollbar { width: 6px; }
+  #terminal::-webkit-scrollbar-track { background: #0d0d0d; }
+  #terminal::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+
+  /* ── Terminal output styles ── */
+  .header {
+    color: #00bbbb;
+    font-weight: bold;
+    margin: 10px 0 6px;
+    white-space: pre;
+    line-height: 1.3;
+  }
+  .section {
+    color: #c0c0c0;
+    margin: 6px 0 3px 4px;
+  }
+  .section .arrow { color: #00bbbb; }
+  .section .bold { font-weight: bold; color: #fff; }
+
+  .result-box {
+    color: #00bb44;
+    white-space: pre-wrap;
+    margin: 6px 0;
+    padding: 4px 8px;
+    border-left: 2px solid #00bb44;
+  }
+
+  .agent-box {
+    margin: 8px 0;
+    white-space: pre-wrap;
+  }
+  .agent-name {
+    color: #cc44cc;
+    font-weight: bold;
+    margin-bottom: 1px;
+  }
+  .agent-line {
+    color: #c0c0c0;
+    border-left: 2px solid #555;
+    padding: 0 0 0 10px;
+  }
+
+  .question-box {
+    margin: 8px 0;
+    border: 1px solid #00bbbb;
+    padding: 8px 10px;
+  }
+  .question-header {
+    color: #ccaa00;
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
+  .question-text { color: #c0c0c0; margin-bottom: 6px; line-height: 1.6; }
+  .question-opt { margin: 2px 0 2px 10px; }
+  .question-opt-letter { color: #00bbbb; }
+
+  .teaching-box {
+    margin: 8px 0;
+    border: 1px solid #cc44cc;
+    padding: 8px 10px;
+  }
+  .teaching-title { color: #ccaa00; font-weight: bold; margin-bottom: 4px; }
+  .teaching-opt { margin: 2px 0 2px 6px; }
+  .teaching-opt-key { color: #00bbbb; }
+
+  .info { color: #888; margin: 3px 0 3px 8px; }
+  .info::before { color: #00bbbb; }
+  .ok { color: #00bb44; margin: 3px 0 3px 10px; }
+  .ok::before { content: '[OK] '; color: #00bb44; }
+  .warn { color: #ccaa00; margin: 3px 0 3px 10px; }
+  .warn::before { content: '[!] '; color: #ccaa00; }
+  .fail { color: #cc4444; margin: 3px 0 3px 10px; }
+  .fail::before { content: '[X] '; color: #cc4444; }
+
+  .score-box { margin: 6px 0; color: #fff; font-weight: bold; }
+  .skill-row { margin: 2px 0 2px 6px; }
+  .skill-name { color: #c0c0c0; }
+  .skill-level { font-weight: bold; }
+
+  .learning-path {
+    margin: 8px 0;
+    border: 1px solid #cc44cc;
+    padding: 8px 10px;
+    white-space: pre-wrap;
+  }
+  .lp-header { color: #ccaa00; font-weight: bold; text-align: center; margin-bottom: 4px; }
+
+  .loader {
+    color: #00bbbb;
+    margin: 4px 0 4px 6px;
+  }
+
+  .option-row { margin: 2px 0 2px 8px; }
+  .option-row .key { color: #00bbbb; }
+
+  .user-echo {
+    color: #888;
+    margin: 3px 0 3px 8px;
+  }
+  .user-echo::before { content: '> '; color: #00bb44; }
+
+  .separator {
+    color: #3a3a3a;
+    margin: 6px 0;
+  }
+  .error {
+    color: #cc4444;
+    font-weight: bold;
+    margin: 6px 0;
+  }
+  .session-end {
+    color: #00bb44;
+    font-weight: bold;
+    margin: 10px 0;
+    text-align: center;
+  }
+
+  /* ── Input bar ── */
+  #input-bar {
+    display: none;
+    align-items: center;
+    padding: 8px 16px;
+    border-top: 1px solid #1a3a1a;
+    background: #0d0f0d;
+    gap: 6px;
+  }
+  #input-bar.show { display: flex; }
+  #input-bar .prompt-symbol { color: #00bb44; font-weight: bold; }
+  #input-bar .prompt-text {
+    color: #fff;
+    font-weight: bold;
+    white-space: nowrap;
+    margin-right: 4px;
+  }
+  #input-bar input {
+    flex: 1;
+    background: #111;
+    border: none;
+    border-bottom: 1px solid #333;
+    color: #33dd88;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    padding: 4px 6px;
+    outline: none;
+    caret-color: #33dd88;
+  }
+  #input-bar input:focus { border-bottom-color: #00bb44; }
+  #input-bar input::placeholder { color: #333; }
+
+  @media (max-width: 700px) {
+    #sidebar { width: 140px; min-width: 140px; padding: 10px; }
+    #terminal { padding: 10px 12px; font-size: 12px; }
+    #workflow { padding: 10px; }
+    .agent-grid { grid-template-columns: repeat(4, minmax(80px, 1fr)); }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<div id="sidebar">
+  <div class="logo">STUDYMATE <span>AI</span></div>
+  <div class="side-section">
+    <div class="label">Student</div>
+    <div class="value empty" id="s-name">—</div>
+  </div>
+  <div class="side-section">
+    <div class="label">Role</div>
+    <div class="value empty" id="s-role">—</div>
+  </div>
+  <div class="side-section">
+    <div class="label">Certification</div>
+    <div class="value empty" id="s-cert">—</div>
+  </div>
+  <div class="side-status">
+    <div class="row"><span class="status-dot idle" id="status-dot"></span><span id="status-text">Idle</span></div>
+    <div class="row" style="color:#555;font-size:11px;margin-top:4px" id="cycle-info"></div>
+  </div>
+</div>
+
+<!-- ── Terminal ── -->
+<div id="terminal-wrap">
+  <section id="workflow" aria-label="StudyMate agent workflow">
+    <div class="workflow-title">StudyMate <span>AI</span> <small>8-agent adaptive learning</small></div>
+    <div class="agent-grid">
+      <div class="agent-card" data-stage="profiler"><span class="number">1</span>Profiler</div>
+      <div class="agent-card" data-stage="knowledge"><span class="number">2</span>Knowledge</div>
+      <div class="agent-card" data-stage="learning_path"><span class="number">3</span>Learning Path</div>
+      <div class="agent-card" data-stage="planner"><span class="number">4</span>Planner</div>
+      <div class="agent-card" data-stage="teaching"><span class="number">5</span>Teaching</div>
+      <div class="agent-card" data-stage="examiner"><span class="number">6</span>Examiner</div>
+      <div class="agent-card" data-stage="manager"><span class="number">7</span>Manager</div>
+      <div class="agent-card" data-stage="ceo"><span class="number">8</span>CEO</div>
+    </div>
+    <div class="mastery-row">
+      <span>Mastery</span>
+      <div class="mastery-track"><div id="mastery-fill"></div></div>
+      <span id="mastery-value">0%</span>
+    </div>
+  </section>
+  <div id="terminal"></div>
+  <div id="input-bar">
+    <span class="prompt-symbol">></span>
+    <span class="prompt-text" id="prompt-text"></span>
+    <input type="text" id="user-input" autofocus spellcheck="false" autocomplete="off" placeholder="type here...">
+  </div>
+</div>
+
+<script>
+const ws = new WebSocket(`ws://${location.host}/ws`);
+const term = document.getElementById('terminal');
+const inputBar = document.getElementById('input-bar');
+const promptText = document.getElementById('prompt-text');
+const userInput = document.getElementById('user-input');
+let loaderInterval = null;
+
+// Sidebar elements
+const sName = document.getElementById('s-name');
+const sRole = document.getElementById('s-role');
+const sCert = document.getElementById('s-cert');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const cycleInfo = document.getElementById('cycle-info');
+const masteryFill = document.getElementById('mastery-fill');
+const masteryValue = document.getElementById('mastery-value');
+const agentCards = [...document.querySelectorAll('.agent-card')];
+
+function setStage(stage) {
+  const normalized = stage.toLowerCase().replace(/[^a-z_]/g, '');
+  const index = agentCards.findIndex(card => normalized.includes(card.dataset.stage));
+  agentCards.forEach((card, i) => {
+    card.classList.toggle('active', i === index);
+    card.classList.toggle('done', index >= 0 && i < index);
+  });
+}
+
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  handleMsg(msg);
+};
+ws.onclose = () => {
+  if (loaderInterval) clearInterval(loaderInterval);
+  statusDot.className = 'status-dot idle';
+  statusText.textContent = 'Disconnected';
+};
+
+function add(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  term.appendChild(d);
+  term.scrollTop = term.scrollHeight;
+}
+
+function esc(t) {
+  const d = document.createElement('div');
+  d.textContent = t;
+  return d.innerHTML;
+}
+
+function setStatus(state, text) {
+  statusDot.className = 'status-dot ' + state;
+  statusText.textContent = text;
+}
+
+function handleMsg(msg) {
+  switch (msg.type) {
+    case 'startup':
+      add('<div class="header">.' + '='.repeat(56) + '.<br>| ' + pad('STUDYMATE AI', 56) + ' |<br>\'' + '='.repeat(56) + '\'</div>');
+      add('<div class="info">Session starting...</div>');
+      setStatus('active', 'Starting');
+      break;
+
+    case 'header':
+      add(`<div class="header">.${'='.repeat(56)}.<br>| ${pad(msg.title, 56)} |<br>'${'='.repeat(56)}'</div>`);
+      setStatus('active', 'Running');
+      setStage(msg.title);
+      break;
+
+    case 'section':
+      add(`<div class="section"><span class="arrow">></span> <span class="bold">${esc(msg.title)}</span></div>`);
+      break;
+
+    case 'agent_output':
+      let h = `<div class="agent-box"><div class="agent-name">${esc(msg.name)}</div>`;
+      for (const l of msg.lines) h += `<div class="agent-line">${esc(l)}</div>`;
+      h += '</div>';
+      add(h);
+      break;
+
+    case 'result_box':
+      add(`<div class="result-box">${esc(msg.text)}</div>`);
+      break;
+
+    case 'info':
+      add(`<div class="info">${esc(msg.text)}</div>`);
+      break;
+
+    case 'ok':
+      add(`<div class="ok">${esc(msg.text)}</div>`);
+      break;
+
+    case 'warn':
+      add(`<div class="warn">${esc(msg.text)}</div>`);
+      break;
+
+    case 'fail':
+      add(`<div class="fail">${esc(msg.text)}</div>`);
+      break;
+
+    case 'question':
+      let q = `<div class="question-box"><div class="question-header">Q${msg.q_num} — ${esc(msg.skill)}</div>`;
+      q += `<div class="question-text">${esc(msg.question)}</div>`;
+      for (let i = 0; i < msg.options.length; i++) {
+        q += `<div class="question-opt"><span class="question-opt-letter">${String.fromCharCode(65+i)}.</span> ${esc(msg.options[i])}</div>`;
+      }
+      q += '</div>';
+      add(q);
+      break;
+
+    case 'score':
+      add(`<div class="score-box">${esc(msg.label)}: ${msg.correct}/${msg.total} (${msg.pct}%)</div>`);
+      masteryFill.style.width = Math.min(100, Math.max(0, msg.pct)) + '%';
+      masteryValue.textContent = msg.pct + '%';
+      break;
+
+    case 'learning_path':
+      add(`<div class="learning-path"><div class="lp-header">LEARNING PATH</div>${esc(msg.text)}</div>`);
+      break;
+
+    case 'teaching_options':
+      add(`<div class="teaching-box"><div class="teaching-title">TEACHING OPTIONS</div>` +
+          `<div class="teaching-opt"><span class="teaching-opt-key">[doubt]</span> I have a doubt / question</div>` +
+          `<div class="teaching-opt"><span class="teaching-opt-key">[next]</span> I understand, move to next topic</div></div>`);
+      break;
+
+    case 'option_list':
+      for (const [k, d] of msg.options)
+        add(`<div class="option-row"><span class="key">[${esc(k)}]</span> ${esc(d)}</div>`);
+      break;
+
+    case 'separator':
+      add(`<div class="separator">${'═'.repeat(56)}</div>`);
+      break;
+
+    case 'loader':
+      showLoader(msg.message);
+      break;
+
+    case 'input':
+      hideLoader();
+      showInput(msg.prompt);
+      break;
+
+    case 'profile':
+      sName.textContent = esc(msg.name);
+      sName.className = 'value';
+      sRole.textContent = esc(msg.role);
+      sRole.className = 'value';
+      sCert.textContent = esc(msg.cert);
+      sCert.className = 'value';
+      break;
+
+    case 'session_end':
+      hideLoader();
+      hideInput();
+      add('<div class="session-end">SESSION COMPLETE</div>');
+      setStatus('idle', 'Complete');
+      break;
+
+    case 'error':
+      hideLoader();
+      add(`<div class="error">Error: ${esc(msg.text)}</div>`);
+      setStatus('idle', 'Error');
+      break;
+  }
+}
+
+function pad(text, w) {
+  const p = w - text.length;
+  const l = Math.floor(p / 2);
+  return ' '.repeat(Math.max(0, l)) + text + ' '.repeat(Math.max(0, p - l));
+}
+
+let loaderEl = null;
+function showLoader(msg) {
+  hideLoader();
+  const id = 'ldr-' + Date.now();
+  loaderEl = id;
+  add(`<div class="loader" id="${id}">${esc(msg)}</div>`);
+  let d = 0;
+  loaderInterval = setInterval(() => {
+    d = (d + 1) % 4;
+    const el = document.getElementById(id);
+    if (el) el.textContent = msg + '.'.repeat(d);
+  }, 250);
+}
+function hideLoader() {
+  if (loaderInterval) { clearInterval(loaderInterval); loaderInterval = null; }
+  loaderEl = null;
+}
+
+function showInput(prompt) {
+  promptText.textContent = prompt;
+  userInput.value = '';
+  inputBar.classList.add('show');
+  userInput.focus();
+}
+function hideInput() {
+  inputBar.classList.remove('show');
+}
+
+userInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const val = userInput.value;
+    hideInput();
+    add(`<div class="user-echo">${esc(val)}</div>`);
+    ws.send(JSON.stringify({ type: 'input_response', value: val }));
+  }
+});
+
+// Initial state
+setStatus('idle', 'Connecting...');
+</script>
+</body>
+</html>

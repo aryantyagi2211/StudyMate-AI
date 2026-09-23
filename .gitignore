@@ -3,3 +3,5 @@ venv/
 .env
 __pycache__/
 *.pyc
+.studymate_session*.json
+.studymate_progress.json

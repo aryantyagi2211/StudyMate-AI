@@ -5,39 +5,33 @@ Auto-detects ANSI color support with graceful fallback.
 """
 
 import os
+import shutil
 import sys
 import re
 
-# ── ANSI color detection ──────────────────────────────────────────────────
 _USE_COLOR = True
 
-if os.name == 'nt':
-    # Try to enable Virtual Terminal Processing on Windows 10+
-    try:
-        import ctypes
-        kernel32 = ctypes.windll.kernel32
-        STD_OUTPUT_HANDLE = -11
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
-        handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
-        mode = ctypes.c_uint32()
-        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-            kernel32.SetConsoleMode(handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
-    except Exception:
-        pass
+def _init_ansi():
+    global _USE_COLOR
+    if os.name == 'nt':
+        try:
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            mode = ctypes.c_uint32()
+            h = k32.GetStdHandle(-11)
+            if h and k32.GetConsoleMode(h, ctypes.byref(mode)):
+                k32.SetConsoleMode(h, mode.value | 0x0004)
+        except Exception:
+            pass
+        try:
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
+    if not sys.stdout.isatty():
+        _USE_COLOR = False
 
-# Detect if terminal supports color
-if not sys.stdout.isatty():
-    _USE_COLOR = False
-elif os.name == 'nt' and not os.environ.get('TERM'):
-    # Windows without TERM var — assume color if VT processing was enabled above
-    pass
-
-# Ensure UTF-8 output on Windows terminals
-if os.name == 'nt':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8') if hasattr(sys.stdout, 'reconfigure') else None
-    except Exception:
-        pass
+_init_ansi()
 
 # ── Color palette ──────────────────────────────────────────────────────────
 class C:
@@ -79,10 +73,6 @@ BL = "'"
 BR = "'"
 LT = '|'
 RT = '|'
-TT = '+'
-BT = '+'
-CR = '+'
-
 DH = '='
 DV = '|'
 DTL = '.'
@@ -93,16 +83,8 @@ DLT = '|'
 DRT = '|'
 
 BLOCK = '#'
-BLOCK_L = '#'
-BLOCK_R = '#'
-BLOCK_T = '#'
-BLOCK_B = '#'
-SHADE_D = '#'
-SHADE_M = ':'
 SHADE_L = '.'
 TRI_R = '>'
-TRI_L = '<'
-STAR = '*'
 DOT = '.'
 
 
@@ -126,48 +108,18 @@ def bold(text):
     return f'{C.BLD}{text}{C.RST}'
 
 
-def dim(text):
-    if not _USE_COLOR:
-        return text
-    return f'{C.DIM}{text}{C.RST}'
-
-
-# ── Banner ─────────────────────────────────────────────────────────────────
-
-_c1 = c('.' + '=' * 66 + '.', C.CYN)
-_c2 = c('|', C.CYN)
-_c3 = c("'" + '=' * 66 + "'", C.CYN)
-_c4 = c('  ============  Multi-Agent Certification Coach  ============', C.YLW)
-
-_L1 = c('  _____  _    _  ___   _  __  __   ____  _____  _____  ', C.MGT)
-_L2 = c(' / ____|| |  | || \\ \\ / /  \\ \\/ /  / __ \\|_   _|/ ____|', C.MGT)
-_L3 = c('| (___  | |  | ||  \\ V /    \\  /  | |  | | | | | (___  ', C.MGT)
-_L4 = c(' \\___ \\ | |  | ||   > <     /  \\  | |  | | | |  \\___ \\ ', C.MGT)
-_L5 = c(' ____) || |__| ||  / . \\   / /\\ \\ | |__| |_| |_ ____) |', C.MGT)
-_L6 = c('|_____/  \\____/ |_/_/_\\_\\ /_/  \\_\\ \\____/|_____|_____/ ', C.MGT)
-
-BANNER = '\n'.join([
-    _c1,
-    f'{_c2}  {_L1}  {_c2}',
-    f'{_c2}  {_L2}  {_c2}',
-    f'{_c2}  {_L3}  {_c2}',
-    f'{_c2}  {_L4}  {_c2}',
-    f'{_c2}  {_L5}  {_c2}',
-    f'{_c2}  {_L6}  {_c2}',
-    _c3,
-    _c4,
-])
-
-
-def print_banner():
-    """Print the pixel-style banner"""
-    print(BANNER)
+def terminal_width(default=60, minimum=24):
+    """Return a usable content width for both wide and narrow terminals."""
+    columns = shutil.get_terminal_size(fallback=(default + 4, 24)).columns
+    return max(minimum, min(default, columns - 4))
 
 
 # ── Headers ────────────────────────────────────────────────────────────────
 
-def header(title, width=60):
+def header(title, width=None):
     """Pixel-style header with double lines"""
+    width = terminal_width(width or 60)
+    title = title[: max(1, width - 2)]
     pad = width - len(title) - 2
     lpad = pad // 2
     rpad = pad - lpad
@@ -179,44 +131,19 @@ def header(title, width=60):
     print()
 
 
-def subheader(title):
-    """Smaller single-line header"""
-    line = f'{TL}{H * 50}{TR}'
-    print(c(f'\n{line}', C.GRY))
-    print(c(f'{V} {bold(title)}', C.GRY))
-    print(c(f'{BL}{H * 50}{BR}', C.GRY))
-
-
 def section(title):
     """Inline section marker"""
     print()
     print(c(f'  {c(TRI_R, C.CYN)} {bold(title)}', C.WHT))
 
 
-def divider(char='─', color=C.GRY):
-    print(c(f'  {char * 56}', color))
-
-
 # ── Boxes ──────────────────────────────────────────────────────────────────
 
-def box(text, width=58, color=C.WHT):
-    """Draw text inside a bordered box"""
-    lines = text.split('\n')
-    # Calculate available width for content
-    content_w = width - 4
-    print(c(f'  {TL}{H * width}{TR}', C.GRY))
-    for line in lines:
-        # Wrap long lines
-        while len(line) > content_w:
-            print(c(f'  {V} {line[:content_w]} {V}', C.GRY))
-            line = line[content_w:]
-        pad = content_w - len(line)
-        print(c(f'  {V} {line}{" " * pad} {V}', C.GRY))
-    print(c(f'  {BL}{H * width}{BR}', C.GRY))
-
-
-def result_box(text, width=58):
+def result_box(text, width=None):
     """Result box with colored borders"""
+    width = terminal_width(width or 58)
+    if not text:
+        text = ""
     lines = text.split('\n')
     content_w = width - 4
     print(c(f'  {DTL}{DH * width}{DTR}', C.GRN))
@@ -227,20 +154,6 @@ def result_box(text, width=58):
         pad = content_w - len(line)
         print(c(f'  {DV} {line}{" " * pad} {DV}', C.GRN))
     print(c(f'  {DBL}{DH * width}{DBR}', C.GRN))
-
-
-def error_box(text, width=58):
-    """Error/warning box"""
-    lines = text.split('\n')
-    content_w = width - 4
-    print(c(f'  {DTL}{DH * width}{DTR}', C.YLW))
-    for line in lines:
-        while len(line) > content_w:
-            print(c(f'  {DV} {line[:content_w]} {DV}', C.YLW))
-            line = line[content_w:]
-        pad = content_w - len(line)
-        print(c(f'  {DV} {line}{" " * pad} {DV}', C.YLW))
-    print(c(f'  {DBL}{DH * width}{DBR}', C.YLW))
 
 
 # ── Progress bar ────────────────────────────────────────────────────────────
@@ -269,6 +182,31 @@ def score_display(correct, total, label="Score"):
     return pct
 
 
+def adaptive_cycle_status(cycle, max_cycles, score, weak_skills):
+    """Show the current adaptive cycle and the stages it will execute."""
+    weak_text = ", ".join(weak_skills) if weak_skills else "None identified"
+    print(
+        f"  {c('ADAPTIVE LOOP', C.CYN)}  "
+        f"Cycle {cycle}/{max_cycles}  |  Current mastery: {score}%"
+    )
+    print(f"    {c('Teaching -> Examiner -> Manager -> CEO', C.WHT)}")
+    print(f"    Weak skills: {c(weak_text, C.YLW if weak_skills else C.GRN)}")
+
+
+def report_card(report):
+    """Display the final outcome of the adaptive learning loop."""
+    status_color = C.GRN if report["status"] == "MASTERED" else C.YLW
+    weak_text = ", ".join(report["weak_skills"]) if report["weak_skills"] else "None"
+    header("FINAL REPORT CARD")
+    print(f"    Status: {c(report['status'], status_color + C.BLD)}")
+    print(
+        f"    Mastery: {c(str(report['score']) + '%', status_color + C.BLD)} "
+        f"(required: {report['mastery_threshold']}%)"
+    )
+    print(f"    Learning cycles: {report['cycles']}")
+    print(f"    Weak skills: {weak_text}")
+
+
 # ── Options menu ───────────────────────────────────────────────────────────
 
 def option_list(options):
@@ -278,8 +216,13 @@ def option_list(options):
 
 
 def input_prompt(text):
-    """Styled input prompt"""
-    return input(f'  {c(TRI_R, C.CYN)} {c(text, C.BLD)} ')
+    """Styled input prompt. Gracefully handles Ctrl+C and EOF."""
+    try:
+        return input(f'  {c(TRI_R, C.CYN)} {c(text, C.BLD)} ')
+    except (EOFError, KeyboardInterrupt):
+        print()
+        print(f'  {c("[!]", C.YLW)} Session interrupted. Goodbye!')
+        sys.exit(0)
 
 
 # ── Status indicators ──────────────────────────────────────────────────────
@@ -304,6 +247,7 @@ def info(text):
 
 def agent_output(agent_name, text, width=58):
     """Display agent output in a styled box"""
+    width = terminal_width(width)
     content_w = width - 4
     print(c(f'  {DLT}{DH * width}{DRT}', C.MGT))
     # Agent name header
@@ -327,16 +271,19 @@ def agent_output(agent_name, text, width=58):
 
 def display_question(q_num, skill, question, options):
     """Display a question in pixel style"""
-    print(c(f'  {DTL}{DH * 56}{DTR}', C.CYN))
-    print(c(f'  {DV}  {c(f"Q{q_num}", C.YLW)}  {c(skill, C.BLD):45s} {DV}', C.CYN))
-    print(c(f'  {LT}{H * 56}{RT}', C.GRY))
+    width = terminal_width(56)
+    content_w = width - 4
+    print(c(f'  {DTL}{DH * width}{DTR}', C.CYN))
+    skill_text = skill[: max(1, content_w - len(str(q_num)) - 5)]
+    print(c(f'  {DV}  {c(f"Q{q_num}", C.YLW)}  {c(skill_text, C.BLD)}{" " * max(0, content_w - len(skill_text) - len(str(q_num)) - 4)}{DV}', C.CYN))
+    print(c(f'  {LT}{H * width}{RT}', C.GRY))
 
     # Wrap question text
     q_words = question.split()
     q_lines = []
     current = ""
     for w in q_words:
-        if len(current) + len(w) + 1 > 52:
+        if len(current) + len(w) + 1 > content_w:
             q_lines.append(current)
             current = w
         else:
@@ -345,26 +292,29 @@ def display_question(q_num, skill, question, options):
         q_lines.append(current)
 
     for line in q_lines:
-        print(c(f'  {V} ', C.GRY) + line + c(f'{" " * (54 - len(line))} {V}', C.GRY))
+        print(c(f'  {V} ', C.GRY) + line + c(f'{" " * max(0, content_w + 2 - len(line))} {V}', C.GRY))
 
-    print(c(f'  {LT}{H * 56}{RT}', C.GRY))
+    print(c(f'  {LT}{H * width}{RT}', C.GRY))
 
     for i, opt in enumerate(options):
         letter = chr(65 + i)
-        print(c(f'  {V}  ', C.GRY) + c(f'{letter}.', C.CYN) + c(f' {opt}', C.WHT) + c(f'{" " * max(0, 52 - len(opt) - 2)} {V}', C.GRY))
+        option = str(opt)
+        print(c(f'  {V}  ', C.GRY) + c(f'{letter}.', C.CYN) + c(f' {option}', C.WHT) + c(f'{" " * max(0, content_w - len(option) - 2)} {V}', C.GRY))
 
-    print(c(f'  {BL}{H * 56}{BR}', C.GRY))
+    print(c(f'  {BL}{H * width}{BR}', C.GRY))
 
 
 def teaching_options():
     """Display teaching flow options"""
+    width = terminal_width(56)
+    content_w = width - 2
     print()
-    print(c(f'  .{"=" * 56}.', C.MGT))
-    print(c(f'  |  {c(bold("TEACHING OPTIONS"), C.YLW):54s} |', C.MGT))
-    print(c(f'  +{"=" * 56}+', C.MGT))
-    print(c(f'  |  {c("[doubt]", C.CYN)}  {c("I have a doubt / question about this topic", C.WHT):46s} |', C.MGT))
-    print(c(f'  |  {c("[next]", C.CYN)}   {c("I understand, move to the next topic", C.WHT):46s} |', C.MGT))
-    print(c(f"  '{'=' * 56}'", C.MGT))
+    print(c(f'  .{"=" * width}.', C.MGT))
+    print(c(f'  |  {c(bold("TEACHING OPTIONS"), C.YLW)}{" " * max(0, content_w - len("  TEACHING OPTIONS"))} |', C.MGT))
+    print(c(f'  +{"=" * width}+', C.MGT))
+    print(c(f'  |  {c("[doubt]", C.CYN)}  {c("I have a doubt / question about this topic", C.WHT)} |', C.MGT))
+    print(c(f'  |  {c("[next]", C.CYN)}   {c("I understand, move to the next topic", C.WHT)} |', C.MGT))
+    print(c(f"  '{'=' * width}'", C.MGT))
     print()
 
 
@@ -416,8 +366,7 @@ _SKILL_COLORS = [C.CYN, C.GRN, C.YLW, C.MGT, C.BLU, C.GRN]
 def display_learning_path(text):
     """Display learning path content inside a pixel-style outer box,
     with colored skill sections, bullet markers, and highlighted links."""
-    width = 58
-    skills_colors = _SKILL_COLORS
+    width = terminal_width(58)
     color_idx = 0
 
     # Split by skill-level headers (standalone **Header** or ## Header)
@@ -430,7 +379,7 @@ def display_learning_path(text):
 
     if not header_positions:
         # No sections found — fallback to rich lines inside a plain box
-        _print_rich_lines(text.split('\n'), C.CYN)
+        _print_rich_lines(text.split('\n'))
         return
 
     sections = []
@@ -449,7 +398,7 @@ def display_learning_path(text):
     print(c(f'  |{"=" * (width + 2)}|', C.MGT))
 
     for idx, (header_text, body) in enumerate(sections):
-        section_color = skills_colors[color_idx % len(skills_colors)]
+        section_color = _SKILL_COLORS[color_idx % len(_SKILL_COLORS)]
         color_idx += 1
         header_upper = header_text.upper()
 
@@ -497,7 +446,7 @@ def _format_rich_line(line):
     return line
 
 
-def _print_rich_lines(lines, color=C.CYN):
+def _print_rich_lines(lines):
     """Fallback: display lines with link highlighting"""
     for line in lines:
         display_line = _format_rich_line(line)

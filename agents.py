@@ -1,7 +1,5 @@
 """
-agents.py — StudyMate AI Agent Definitions (Direct Groq Integration)
-
-Enhanced agent implementation with verbose/debug, reasoning, and Foundry IQ search.
+Agents that talk to LLMs (Groq / OpenRouter) and optionally search the web.
 """
 
 from openai import AsyncOpenAI, RateLimitError
@@ -10,74 +8,137 @@ import os
 import asyncio
 import random
 import re
-import time
-from datetime import datetime
 
 load_dotenv()
 
-# Multiple API keys for rotation
-API_KEYS = []
+MODEL_TIMEOUT_SECONDS = float(os.getenv("STUDYMATE_MODEL_TIMEOUT_SECONDS", "45"))
+MODEL_MAX_RETRIES = int(os.getenv("STUDYMATE_MODEL_MAX_RETRIES", "3"))
 
-# Collect all GROQ_API_KEY* environment variables
-for key in ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3", "GROQ_API_KEY_4", "GROQ_API_KEY_5"]:
-    api_key = os.getenv(key)
-    if api_key and api_key.strip():
-        API_KEYS.append(api_key.strip())
+# ── Groq setup ──────────────────────────────────────────────────────────
+def _load_api_keys():
+    keys = []
+    # Named env vars: GROQ_API_KEY, GROQ_API_KEY_2, etc.
+    for name in ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3", "GROQ_API_KEY_4", "GROQ_API_KEY_5"]:
+        val = os.getenv(name)
+        if val:
+            keys.extend(k.strip() for k in val.split(",") if k.strip())
+    return list(dict.fromkeys(keys))  # deduplicate preserving order
 
-# Also support comma-separated keys in GROQ_API_KEY
-if os.getenv("GROQ_API_KEY"):
-    for key in os.getenv("GROQ_API_KEY", "").split(","):
-        if key.strip() and key.strip() not in API_KEYS:
-            API_KEYS.append(key.strip())
+GROQ_KEYS = _load_api_keys()
+GROQ_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
 
-if not API_KEYS:
-    raise ValueError("No GROQ_API_KEY found in .env file!")
+if GROQ_KEYS:
+    print(f"[API] Groq: {len(GROQ_KEYS)} key(s) loaded")
 
-print(f"[API] Loaded {len(API_KEYS)} API key(s) for rotation")
-
-# Multiple models for load balancing and rate limit handling
-# Using stable models without tool-calling issues
-MODELS = [
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile"
+# ── OpenRouter setup ────────────────────────────────────────────────────
+ROUTER_KEY = os.getenv("ROUTER_API_KEY")
+ROUTER_MODELS = [
+    "openrouter/free",
+    "meta-llama/llama-3.3-70b-instruct:free",
 ]
 
-def get_groq_client():
-    """Get a Groq client with a random API key"""
-    api_key = random.choice(API_KEYS)
-    return AsyncOpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=api_key,
-    )
-
-def get_model():
-    """Rotate between available models to handle rate limits"""
-    return random.choice(MODELS)
-
-
-def print_debug(message: str, verbose: bool = False):
-    """Print debug messages when verbose mode is enabled"""
-    if verbose:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[DEBUG {timestamp}] {message}")
+AUTHORITATIVE_SOURCE_DOMAINS = {
+    "AWS": ("docs.aws.amazon.com", "aws.amazon.com"),
+    "AZURE": ("learn.microsoft.com", "azure.microsoft.com"),
+    "AZ-": ("learn.microsoft.com", "azure.microsoft.com"),
+    "GCP": ("cloud.google.com",),
+    "GOOGLE": ("cloud.google.com",),
+    "KUBERNETES": ("kubernetes.io",),
+    "CISCO": ("cisco.com",),
+    "CCNA": ("cisco.com",),
+    "CISSP": ("isc2.org",),
+    "COMPTIA": ("comptia.org",),
+    "RED HAT": ("redhat.com",),
+    "LINUX FOUNDATION": ("training.linuxfoundation.org",),
+    "PMP": ("pmi.org",),
+    "ORACLE": ("oracle.com",),
+}
 
 
-def print_reasoning(step: int, thought: str, verbose: bool = False):
-    """Print reasoning steps when verbose mode is enabled"""
-    if verbose:
-        print(f"[REASONING Step {step}] {thought}")
+def get_authoritative_source_domains(certification: str) -> tuple[str, ...]:
+    """Return official domains to prioritize for a certification."""
+    normalized = certification.upper()
+    for keyword, domains in AUTHORITATIVE_SOURCE_DOMAINS.items():
+        if keyword in normalized:
+            return domains
+    return ()
+
+
+def add_authoritative_source_filter(query: str, certification: str) -> str:
+    """Prefer official documentation without excluding unknown certifications."""
+    domains = get_authoritative_source_domains(certification)
+    if not domains:
+        return query
+    return f"{query} ({' OR '.join(f'site:{domain}' for domain in domains)})"
+
+if ROUTER_KEY:
+    print("[API] OpenRouter: loaded")
+
+# ── Provider selection ──────────────────────────────────────────────────
+PROVIDER_WEIGHTS = []
+if GROQ_KEYS:
+    PROVIDER_WEIGHTS.append("groq")
+if ROUTER_KEY:
+    PROVIDER_WEIGHTS.append("openrouter")
+
+
+def get_runtime_status():
+    """Return a safe, serializable view of the model configuration."""
+    return {
+        "groq_keys_loaded": len(GROQ_KEYS),
+        "openrouter_key_loaded": bool(ROUTER_KEY),
+        "providers": list(PROVIDER_WEIGHTS),
+        "configured": bool(PROVIDER_WEIGHTS),
+    }
+
+
+def validate_runtime_config():
+    """Fail only at runtime with a clear message when the app is missing keys."""
+    if not PROVIDER_WEIGHTS:
+        raise ValueError("No AI provider keys found. Add GROQ_API_KEY or ROUTER_API_KEY to your .env file and restart the app.")
+    return get_runtime_status()
+
+
+def get_client_and_model():
+    """Pick a random provider and return (AsyncOpenAI, model_name)."""
+    validate_runtime_config()
+    provider = random.choice(PROVIDER_WEIGHTS)
+
+    if provider == "openrouter":
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=ROUTER_KEY,
+            timeout=MODEL_TIMEOUT_SECONDS,
+            default_headers={
+                "HTTP-Referer": "http://localhost",
+                "X-Title": "StudyMate AI",
+            },
+        )
+        model = random.choice(ROUTER_MODELS)
+    else:
+        api_key = random.choice(GROQ_KEYS)
+        client = AsyncOpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=api_key,
+            timeout=MODEL_TIMEOUT_SECONDS,
+        )
+        model = random.choice(GROQ_MODELS)
+
+    return client, model, provider
 
 
 class SimpleAgent:
-    def __init__(self, name, description, instructions, verbose=False, reasoning=False, enable_tools=False):
+    def __init__(self, name, description, instructions, reasoning=False, enable_tools=False):
         self.name = name
         self.description = description
         self.instructions = instructions
-        self.verbose = verbose
         self.reasoning = reasoning
         self.enable_tools = enable_tools
-        self.tool_calls_count = 0
-        self.total_tokens = 0
+        self.last_sources = []
+
+    def get_last_sources(self):
+        """Return the source records used by the most recent search."""
+        return [dict(source) for source in self.last_sources]
         
     def create_session(self):
         """Create a new conversation session"""
@@ -160,15 +221,20 @@ class SimpleAgent:
 
         return ""
 
-    def _build_search_query(self, prompt: str) -> str:
+    def _get_cert(self, prompt):
+        """Pull certification from prompt or fall back to session data."""
         cert = self._extract_cert(prompt)
         if not cert:
             try:
                 import tasks
-                if tasks.LEARNER and tasks.LEARNER.get('certification'):
-                    cert = tasks.LEARNER['certification']
+                if tasks.LEARNER:
+                    cert = tasks.LEARNER.get('certification', '')
             except ImportError:
                 pass
+        return cert
+
+    def _build_search_query(self, prompt: str) -> str:
+        cert = self._get_cert(prompt)
         if not cert:
             words = [w for w in prompt.split() if w.isupper() and len(w) > 2][:5]
             if words:
@@ -176,34 +242,37 @@ class SimpleAgent:
             return f"certification exam topics study guide 2026"
         base = f"{cert} exam"
         if self.name == "Knowledge Checker":
-            return f"{base} past exam questions real exam paper questions answers 2024 2025 2026"
+            query = f"{base} official exam guide sample questions 2024 2025 2026"
         elif self.name == "Examiner Agent":
-            return f"{base} previous year question paper real exam dumps sample questions 2024 2025"
+            query = f"{base} official exam guide sample questions 2024 2025"
         elif "teach" in prompt.lower() or "learn" in prompt.lower():
-            return f"{cert} concepts tutorial documentation guide"
+            query = f"{cert} concepts official documentation guide"
         else:
-            return f"{cert} certification guide 2026"
+            query = f"{cert} certification official guide 2026"
+        return add_authoritative_source_filter(query, cert)
 
     async def _perform_search(self, query: str) -> str:
         """Do multiple targeted searches and combine results for richer context"""
         try:
             from tools.web_search import web_search, format_search_results
 
-            cert = self._extract_cert(query)
-            if not cert:
-                try:
-                    import tasks
-                    if tasks.LEARNER and tasks.LEARNER.get('certification'):
-                        cert = tasks.LEARNER['certification']
-                except ImportError:
-                    pass
+            cert = self._get_cert(query)
 
             # Always do multiple targeted searches — focus on past exam papers
             searches = [query]
             if cert:
-                searches.append(f"{cert} question paper previous year exam 2024 2025")
-                searches.append(f"{cert} exam dumps real questions actual test")
-                searches.append(f"{cert} sample questions answers practice test")
+                searches.append(add_authoritative_source_filter(
+                    f"{cert} official question samples exam 2024 2025",
+                    cert,
+                ))
+                searches.append(add_authoritative_source_filter(
+                    f"{cert} official certification objectives and exam guide",
+                    cert,
+                ))
+                searches.append(add_authoritative_source_filter(
+                    f"{cert} official practice assessment questions",
+                    cert,
+                ))
             else:
                 searches.append(f"{query} past exam papers previous year questions")
                 searches.append(f"{query} sample test questions answers")
@@ -211,9 +280,9 @@ class SimpleAgent:
             all_results = []
             for q in searches:
                 try:
-                    res = web_search(q, num_results=4)
+                    res = await asyncio.to_thread(web_search, q, num_results=4)
                     all_results.extend(res)
-                except:
+                except Exception:
                     pass
 
             seen = set()
@@ -223,52 +292,37 @@ class SimpleAgent:
                     seen.add(r["link"])
                     unique_results.append(r)
 
-            formatted = format_search_results(unique_results[:10], max_results=10)
-            self.tool_calls_count += 1
-
-            if self.verbose:
-                print(f"\n[TOOL CALL] web_search ({len(searches)} queries, {len(unique_results)} unique results)")
-                for i, q in enumerate(searches):
-                    print(f"[QUERY {i+1}] {q}")
-                print(formatted)
-
+            self.last_sources = [
+                {
+                    "title": result.get("title", ""),
+                    "link": result.get("link", ""),
+                    "snippet": result.get("snippet", ""),
+                }
+                for result in unique_results[:10]
+                if result.get("link")
+            ]
+            if not self.last_sources:
+                return ""
+            formatted = format_search_results(self.last_sources, max_results=10)
             return formatted
         except Exception as e:
-            print_debug(f"Search error: {e}", self.verbose)
+            self.last_sources = []
+            print(f"[WARN] Search error: {e}")
             return ""
     
-    async def run(self, prompt, session=None, max_retries=3):
-        """Run the agent with a prompt, with rate limit handling"""
-        start_time = time.time()
-        
+    async def run(self, prompt, session=None, max_retries=MODEL_MAX_RETRIES):
         if session is None:
             session = []
         
-        # Verbose mode: Show input details
-        if self.verbose:
-            print("\n" + "="*70)
-            print(f"[AGENT] {self.name}")
-            print(f"[INPUT] {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
-            print(f"[SESSION] {len(session)} messages in history")
-            # print(f"[DEBUG] Full prompt: {prompt[:200]}...")  # sometimes useful for debugging
-        
-        # Build targeted search query and fetch latest information
-        # Only search on the FIRST message in a session to avoid derailing
-        # follow-up messages (like "yes", "next") with irrelevant search results
         search_context = ""
-        is_first_message = session is None or len(session) == 0
+        is_first_message = len(session) == 0
         if self.enable_tools and is_first_message:
             search_query = self._build_search_query(prompt)
-            print_debug(f"Searching web for: {search_query}", self.verbose)
             search_context = await self._perform_search(search_query)
-        elif self.enable_tools:
-            print_debug("Skipping web search (follow-up message in session)", self.verbose)
         
-        # Build enhanced prompt with reasoning if enabled
         enhanced_prompt = prompt
         if self.reasoning:
             enhanced_prompt = self._build_reasoning_prompt(prompt)
-            print_debug("Chain-of-Thought reasoning enabled", self.verbose)
         
         # Force the agent to use search results as the primary source
         if search_context:
@@ -291,16 +345,9 @@ class SimpleAgent:
         # Try different models and API keys if rate limited
         for attempt in range(max_retries):
             try:
-                groq_client = get_groq_client()
-                model = get_model()
+                client, model, provider = get_client_and_model()
                 
-                print_debug(f"Using model: {model}", self.verbose)
-                
-                # Avoid tool-capable models if they cause issues
-                if model == "openai/gpt-oss-20b":
-                    model = "llama-3.1-8b-instant"  # Fallback to stable model
-                
-                response = await groq_client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=0.7,
@@ -309,24 +356,9 @@ class SimpleAgent:
                 
                 assistant_message = response.choices[0].message.content
                 
-                # Track token usage (approximate)
-                prompt_tokens = sum(len(m.get("content", "")) for m in messages) // 4
-                completion_tokens = len(assistant_message) // 4
-                self.total_tokens += (prompt_tokens + completion_tokens)
-                
                 # Update session history
                 session.append({"role": "user", "content": prompt})
                 session.append({"role": "assistant", "content": assistant_message})
-                
-                # Verbose mode: Show output details
-                elapsed = time.time() - start_time
-                if self.verbose:
-                    print(f"[MODEL] {model}")
-                    print(f"[TOKENS] ~{prompt_tokens} prompt + ~{completion_tokens} completion = ~{prompt_tokens + completion_tokens} total")
-                    print(f"[TIME] {elapsed:.2f}s")
-                    print(f"[TOOLS USED] {self.tool_calls_count} calls this session")
-                    print(f"[OUTPUT LENGTH] {len(assistant_message)} characters")
-                    print("="*70 + "\n")
                 
                 # Return response object
                 class Response:
@@ -346,12 +378,18 @@ class SimpleAgent:
                     print("All API keys exhausted. Please wait or add more API keys in .env")
                     print("Format: GROQ_API_KEY=key1,key2,key3")
                     raise
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"\n[WARNING] API error: {e}. Retrying with different key/model...")
+                    await asyncio.sleep(5)
+                else:
+                    print(f"\n[ERROR] API failed after {max_retries} attempts: {e}")
+                    raise
 
 
 ceo_agent = SimpleAgent(
     name="CEO Agent",
     description="Chief Orchestrator of StudyMate AI",
-    verbose=False,
     reasoning=False,
     enable_tools=False,
     instructions="""You are the CEO of StudyMate AI. Be warm, confident, and CONCISE.
@@ -373,7 +411,6 @@ NO long explanations. NO bullet points. Just clear, direct communication."""
 
 profiler_agent = SimpleAgent(
     name="Profiler Agent",
-    verbose=False,
     reasoning=True,
     enable_tools=False,
     description="The Student's First Friend at StudyMate",
@@ -393,7 +430,6 @@ Keep your messages short, warm, and conversational — no bullet points, no head
 knowledge_checker = SimpleAgent(
     name="Knowledge Checker",
     description="Baseline Knowledge Assessor",
-    verbose=False,
     reasoning=True,
     enable_tools=True,
     instructions="""You are the Knowledge Checker. Your job is to test what the student already knows.
@@ -447,7 +483,6 @@ The questions will be presented to the student one at a time."""
 learning_path_agent = SimpleAgent(
     description="Expert Learning Path Designer",
     name="Learning Path Agent",
-    verbose=False,
     reasoning=True,
     enable_tools=True,
     instructions="""You are the Learning Path Agent — a senior developer who has tried a hundred different resources and knows exactly what's worth a student's time.
@@ -464,7 +499,6 @@ adaptive_planner = SimpleAgent(
     name="Adaptive Planner Agent",
     description="Personal Study Schedule Builder",
     reasoning=True,
-    verbose=False,
     enable_tools=False,
     instructions="""You are the Adaptive Planner. Ask questions ONE AT A TIME to build a study schedule.
 
@@ -490,20 +524,47 @@ Keep it simple and actionable."""
 teaching_agent = SimpleAgent(
     name="Teaching Agent",
     description="The World's Most Patient Concept Teacher",
-    verbose=False,
     reasoning=True,
     enable_tools=True,
     instructions="""You are the Teaching Agent — patient, encouraging, and never in a rush.
 
-You teach ONE concept at a time. Each teaching session covers the weak skill areas listed in your task prompt.
+You teach ONE concept at a time. You MUST teach EVERY skill from your task prompt.
+Weak skills (marked PRIORITY) come FIRST. After all weak skills, teach the remaining strong skills with DEEPER / ADVANCED concepts.
 
 YOUR TEACHING FLOW — follow EXACTLY:
 
 === PHASE 1: TEACH ===
-Pick the FIRST untaught weak skill from your task prompt and teach it:
+Pick the FIRST untaught skill from your task prompt (weak skills first, then strong):
 - A clear, simple explanation in plain language
 - A real-world example from an actual job scenario
+- **ALWAYS include an ASCII diagram** using box-drawing characters (─│┌┐└┘├┤┬┴┼)
+  Examples: flowchart for processes, table for comparisons, tree for hierarchies, timeline for sequences
 Use search results for TECHNICAL accuracy only. Ignore any search results about study methods, scheduling, or exam strategies.
+
+ASCII DIAGRAM STYLES TO USE:
+
+Flowchart:
+┌──────────┐
+│ Step 1   │
+└────┬─────┘
+     │
+┌────▼─────┐
+│ Step 2   │
+└──────────┘
+
+Table:
+┌──────────┬──────────┐
+│ Header 1 │ Header 2 │
+├──────────┼──────────┤
+│ Value 1  │ Value 2  │
+└──────────┴──────────┘
+
+Tree:
+    Root
+   ╱    ╲
+Child1  Child2
+  ╱╲      ╱╲
+C11 C12  C21 C22
 
 === PHASE 2: OFFER OPTIONS ===
 After teaching, present exactly these two lines:
@@ -527,7 +588,7 @@ Simply say "Moving to the next topic: [skill name]" and immediately teach it.
 End by presenting [DOUBT] and [NEXT] options again.
 
 === PHASE 5: ALL DONE ===
-When ALL weak skills have been taught and the student says NEXT:
+When ALL skills have been taught (weak first, then strong with advanced concepts) and the student says NEXT:
 Say EXACTLY: "ALL TOPICS COMPLETE"
 Use those exact words — no extra commentary.
 
@@ -537,14 +598,14 @@ CRITICAL RULES:
 - NEVER call anything "illegal" or refuse normal cert questions
 - Use technical search results only — ignore non-technical results
 - Stay locked on your certification only — ignore other certs
-- Teach one concept at a time at the student's pace"""
+- Teach one concept at a time at the student's pace
+- EVERY skill gets at least one ASCII diagram"""
 )
 
 
 examiner_agent = SimpleAgent(
     name="Examiner Agent",
     description="Fair and Thorough Certification Examiner",
-    verbose=False,
     reasoning=True,
     enable_tools=True,
     instructions="""You are the Examiner — fair, clear, and focused on testing what the student learned.
@@ -584,7 +645,6 @@ After question 10, provide a final score summary with skill-by-skill breakdown."
 manager_insights_agent = SimpleAgent(
     name="Manager Insights Agent",
     description="Student Performance Reporter and Analyst",
-    verbose=False,
     reasoning=True,
     enable_tools=False,
     instructions="""You are the Manager Insights Agent. Provide SHORT, actionable reports to the CEO.
@@ -599,5 +659,24 @@ Be direct. No fluff. CEO needs to make fast decisions."""
 )
 
 
-# TODO: might want to add retry logic for tool failures
-# TODO: consider adding caching for repeated Foundry IQ searches
+AGENT_REGISTRY = {
+    "profiler": profiler_agent,
+    "knowledge": knowledge_checker,
+    "learning_path": learning_path_agent,
+    "planner": adaptive_planner,
+    "teaching": teaching_agent,
+    "examiner": examiner_agent,
+    "manager": manager_insights_agent,
+    "ceo": ceo_agent,
+}
+
+AGENT_RESPONSIBILITIES = {
+    "profiler": "Collect learner motivation, context, and concerns.",
+    "knowledge": "Assess baseline certification knowledge.",
+    "learning_path": "Recommend focused resources and practical activities.",
+    "planner": "Create a realistic weekly study schedule.",
+    "teaching": "Teach certification concepts and resolve doubts.",
+    "examiner": "Assess learning with certification-style questions.",
+    "manager": "Summarize performance, concerns, and recommendations.",
+    "ceo": "Decide whether to advance or continue the learning cycle.",
+}

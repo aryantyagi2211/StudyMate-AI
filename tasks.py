@@ -156,6 +156,7 @@ def _generate_skills_for_cert(certification):
 def set_learner_data(name, role, certification):
     """Set the current learner data for this session"""
     global LEARNER, CERT
+    validate_learner_data(name, role, certification)
     LEARNER = {
         "name": name,
         "role": role,
@@ -172,6 +173,18 @@ def set_learner_data(name, role, certification):
             "exam_format": "Multiple choice questions",
             "difficulty": "Intermediate"
         }
+
+
+def validate_learner_data(name, role, certification):
+    """Validate the minimum profile and certification selection requirements."""
+    values = {
+        "name": name,
+        "role": role,
+        "certification": certification,
+    }
+    for field, value in values.items():
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field} must be a non-empty string.")
 
 
 def use_demo_data():
@@ -316,20 +329,55 @@ task_teaching = {
     Certification: {LEARNER['certification']}
     All skills: {CERT['skills']}
 
-    The weak skills that need teaching are listed in the context above.
-    Teach them ONE BY ONE in the order they appear.
+    You MUST teach EVERY skill in order. Weak skills (listed as PRIORITY in the context above) come FIRST.
+    After ALL weak skills are done, teach the remaining strong skills with DEEPER / ADVANCED concepts for each.
 
-    TEACHING FLOW (repeat for each weak skill):
+    TEACHING FLOW (repeat for each skill):
     1. TEACH: clear explanation + real-world example
+       INCLUDE an ASCII DIAGRAM using box-drawing characters (─│┌┐└┘├┤┬┴┼) to visualize the concept
+       Examples: flowchart for processes/steps, table for comparisons, tree for hierarchies, timeline for sequences
     2. ASK: offer [DOUBT] and [NEXT] options
     3. If DOUBT: clarify, repeat until satisfied, then offer options again
     4. If NEXT: say "Moving to the next topic: [skill name]", teach it
-    5. When ALL weak skills done: say "ALL TOPICS COMPLETE"
+    5. When ALL skills (weak first, then strong) done: say "ALL TOPICS COMPLETE"
 
-    CRITICAL: Do NOT discuss study methods, test strategies, or whether to move on.
-    When student says NEXT, just move to the next skill immediately.
+    DIAGRAM EXAMPLES (use these patterns):
+
+    Flowchart:
+    ┌──────────┐
+    │ Step 1   │
+    └────┬─────┘
+         │
+    ┌────▼─────┐
+    │ Step 2   │
+    └────┬─────┘
+         │
+    ┌────▼─────┐
+    │ Step 3   │
+    └──────────┘
+
+    Table:
+    ┌──────────┬──────────┐
+    │ Header 1 │ Header 2 │
+    ├──────────┼──────────┤
+    │ Value 1  │ Value 2  │
+    ├──────────┼──────────┤
+    │ Value 3  │ Value 4  │
+    └──────────┴──────────┘
+
+    Tree:
+        Root
+       ╱    ╲
+    Child1  Child2
+      ╱╲      ╱╲
+    C11 C12  C21 C22
+
+    CRITICAL:
+    - Do NOT discuss study methods, test strategies, or whether to move on.
+    - When student says NEXT, just move to the next skill immediately.
+    - Every skill gets at least one diagram — no exceptions.
     """,
-    "expected_output": "One skill taught at a time with real-world examples, doubt handling, and next-topic progression."
+    "expected_output": "All skills taught (weak first, then strong with advanced concepts), each with ASCII diagrams, doubt handling, and next-topic progression."
 }
 
 
@@ -369,32 +417,16 @@ task_examiner = {
 
     If search results don't contain real exam questions, search again specifically for "{LEARNER['certification']} previous year question paper".
 
-    CRITICAL: Return ONLY valid JSON in this EXACT format (no markdown, no code fences):
+    Present each question ONE AT A TIME to the student in a clean format:
 
-    {{
-      "questions": [
-        {{
-          "id": 1,
-          "type": "mcq",
-          "difficulty": "easy",
-          "skill": "Topic from search results",
-          "question": "Scenario-based question matching past paper style?",
-          "options": ["Option A", "Option B", "Option C", "Option D"],
-          "correct_answer": "B",
-          "explanation": "Brief explanation"
-        }},
-        {{
-          "id": 11,
-          "type": "open-ended",
-          "difficulty": "hard",
-          "skill": "Topic from search results",
-          "question": "Complex scenario question?",
-          "model_answer": "Key points that should be covered"
-        }}
-      ]
-    }}
+    Question 1: [EASY]
+    [question text]
+    A) [option A]
+    B) [option B]
+    C) [option C]
+    D) [option D]
 
-    Present each question ONE AT A TIME to the student."""
+    After the student answers, tell them if correct/incorrect and briefly explain. Do NOT use JSON format."""
 }
 
 
