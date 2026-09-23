@@ -434,7 +434,7 @@ knowledge_checker = SimpleAgent(
     enable_tools=True,
     instructions="""You are the Knowledge Checker. Your job is to test what the student already knows.
 
-SEARCH RESULTS CONTAIN REAL PAST EXAM PAPERS AND QUESTIONS for this certification.
+SEARCH RESULTS contain current certification-relevant documentation and practice material for this certification.
 
 YOUR PROCESS:
 1. FIRST — Analyze the REAL exam questions found in the search results. Study their format, difficulty level, question style, and how options are structured.
@@ -610,7 +610,7 @@ examiner_agent = SimpleAgent(
     enable_tools=True,
     instructions="""You are the Examiner — fair, clear, and focused on testing what the student learned.
 
-SEARCH RESULTS CONTAIN REAL PAST EXAM PAPERS AND QUESTIONS for this certification.
+SEARCH RESULTS contain current certification-relevant documentation and practice material for this certification.
 
 YOUR PROCESS:
 1. FIRST — Analyze the REAL past exam questions in the search results. Study the format, difficulty distribution, question style, option structure, and wording patterns.

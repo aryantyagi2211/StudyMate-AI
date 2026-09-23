@@ -228,7 +228,7 @@ Based on their role, make a warm guess about motivation and set the tone. Keep u
 
 task_knowledge_checker = {
     "description": lambda: f"""
-    Search results contain REAL PAST EXAM PAPERS for {LEARNER['certification']}. Use them as your ONLY source.
+    Use the provided certification-relevant search results as supporting source material for {LEARNER['certification']}.
 
     Certification: {LEARNER['certification']}
     Skills to consider: {CERT['skills']}
@@ -383,7 +383,7 @@ task_teaching = {
 
 task_examiner = {
     "description": lambda: f"""
-    Search results contain REAL PAST EXAM PAPERS for {LEARNER['certification']}. Use them as your ONLY source.
+    Use the provided certification-relevant search results as supporting source material for {LEARNER['certification']}.
 
     Certification: {LEARNER['certification']}
     Skills in scope: {CERT['skills']}
