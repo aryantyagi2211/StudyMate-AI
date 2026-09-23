@@ -1,3 +1,6 @@
+<img width="1536" height="1024" alt="StudyMate AI" src="https://github.com/user-attachments/assets/21c91b88-b29e-4196-868f-1349b6ffcec6" />
+
+
 # 🧠 StudyMate AI - Reasoning Agents
 ### Multi-Step Reasoning AI That Personalizes Your Certification Prep Journey
 
